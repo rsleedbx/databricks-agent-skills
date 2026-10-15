@@ -126,7 +126,7 @@ Confirm before creating any pipeline:
 
 1. **A Unity Catalog target** — catalog and schema must exist; the service principal or user creating the pipeline needs `USE CATALOG`, `USE SCHEMA`, `CREATE TABLE`, and `MODIFY` on the target schema.
 2. **A UC `CONNECTION` object** with credentials for the source. SaaS OAuth U2M connections must be created via the UI (Catalog Explorer); API-key, basic-auth, and database connections can be created via CLI / DAB. Creating one requires `CREATE CONNECTION` on the metastore.
-3. **For CDC database connectors**: network reachability between the gateway (classic compute, customer VPC) and the source database. On-prem requires ExpressRoute (Azure) or Direct Connect (AWS).
+3. **For CDC database connectors**: network reachability from the compute that reads the change log to the source database. That's the integrated CDC pipeline itself, or the gateway for standard CDC. Serverless or classic depends on the current docs and the workspace's compute policy. On-prem requires ExpressRoute (Azure) or Direct Connect (AWS).
 4. **For query-based connectors**: network reachability from **serverless** compute to the source, plus a monotonic cursor column (e.g. `updated_at`, bumped on every update) on each table.
 5. **For file connectors**: OAuth scope grants on the SaaS file repo (SharePoint / Google Drive).
 
@@ -251,9 +251,9 @@ query_based_connector_config: {cursor_columns: [updated_at]}
 ## Important
 
 - **Triggered only, no continuous mode** — pipelines run on a schedule or on-demand, never continuously. Check the connector reference for the latest status.
-- **Compute-only billing** — Lakeflow Connect is billed in DBUs (no per-row fee). Database connectors also incur classic-compute gateway DBUs in addition to the serverless ingestion pipeline DBUs. See the [pricing page](https://www.databricks.com/product/pricing/lakeflow-connect) for current rates.
+- **Compute-only billing** — Lakeflow Connect is billed in DBUs (no per-row fee). Standard CDC adds an always-on gateway on top of the ingestion pipeline. Integrated CDC is one pipeline whose updates run until smart closure ends them, so they can run longer than a standard CDC ingestion run. See the [pricing page](https://www.databricks.com/product/pricing/lakeflow-connect) for current rates.
 - **Salesforce auth is OAuth U2M only** — no machine-to-machine, no basic auth. Connection creation requires a UI walk-through.
-- **Database staging retention is 30 days** (CDC gateway connectors only) by default in the UC Volume between the gateway and the ingestion pipeline.
+- **Database staging retention is 30 days** by default for standard CDC, in the UC Volume between the gateway and the ingestion pipeline. Integrated CDC stages in the volume set by `data_staging_options`; check its docs page for retention.
 - **Limits per pipeline** — most SaaS connectors cap at 250 tables per pipeline. Split across multiple pipelines if needed.
 - **This lands raw tables** — Lakeflow Connect writes source-faithful tables (the ingestion landing zone). Build the medallion Bronze/Silver/Gold transforms on top of them with **databricks-pipelines**.
 
@@ -262,7 +262,7 @@ query_based_connector_config: {cursor_columns: [updated_at]}
 ## Key Concepts
 
 - **UC `CONNECTION` is the credential anchor** — every Lakeflow Connect pipeline points at a UC connection. The connection owns the auth; the pipeline references it by name.
-- **Serverless ingestion pipeline + (optional) classic gateway** — SaaS and query-based connectors are pure serverless. CDC database connectors split into a customer-network gateway (classic) and a serverless ingestion pipeline (Delta-bound).
+- **One pipeline, plus a gateway only for standard CDC** — SaaS, query-based, and integrated CDC connectors are a single pipeline. Standard CDC splits into an always-on gateway and an ingestion pipeline (Delta-bound). Compute (serverless or classic) for each depends on the current docs and the workspace's policy.
 - **Query-based = cursor + latest state** — a query-based pipeline pulls rows whose cursor moved past the last high-water mark. It sees the latest state of each changed row per run, not every intermediate change, and misses hard deletes unless configured (use `deletion_condition` for soft deletes).
 - **CDC and schema evolution are built in** — for sources that support change tracking or CDC, the connector applies changes incrementally and evolves the target schema. Data-type changes typically require a full snapshot reload.
 - **Streaming Delta output** — destination tables are governed Delta tables; CDC sources are applied with change semantics (`APPLY CHANGES` / AUTO CDC, or `apply_changes_from_snapshot` for snapshot sources). Compatible with downstream materialized views and Spark streaming.

@@ -257,7 +257,7 @@ QBC is triggered-only, like every Lakeflow Connect pipeline. Each run is one inc
 resources:
   jobs:
     pg_query_based_schedule:
-      name: pg_query_based_schedule
+      name: <base>-schedule            # the pipeline name + -schedule
       trigger:
         periodic:
           interval: 1

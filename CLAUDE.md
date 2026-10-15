@@ -190,7 +190,7 @@ python3 scripts/skills.py validate
 **Gotchas:**
 
 - `workspace import --format SOURCE` stores every file as a notebook, prepending `# Databricks notebook source`. Always `tail -n +2` after export.
-- Avoid em-dash and other non-ASCII in shell scripts uploaded this way -- the notebook round-trip can mangle them. Use `--` instead of `--`.
+- Avoid em-dash and other non-ASCII in shell scripts uploaded this way -- the notebook round-trip can mangle them. Use `--` instead of an em-dash.
 - Do not use `git format-patch` through the workspace bridge. The notebook format corrupts diff context lines, causing `git apply` to fail with "patch does not apply". Upload individual files instead.
 
 ## Testing skill changes
