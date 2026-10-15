@@ -280,11 +280,14 @@
         "assets/databricks.svg",
         "references/1-saas-connectors.md",
         "references/2-database-connectors.md",
+        "references/3-query-based-connectors.md",
         "references/4-ingestion-decision-tree.md",
-        "references/5-troubleshooting-and-monitoring.md"
+        "references/5-troubleshooting-and-monitoring.md",
+        "references/6-lakebase-as-postgres-source.md",
+        "references/7-source-sql-through-connection.md"
       ],
       "repo_dir": "skills",
-      "version": "0.1.0"
+      "version": "0.2.0"
     },
     "databricks-metric-views": {
       "description": "Unity Catalog metric views: define, create, query, and manage governed business metrics in YAML.",

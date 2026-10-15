@@ -1,12 +1,154 @@
 # Database connectors
 
-SQL Server (cloud and on-prem) is the GA database connector covered in full here. The MySQL integrated CDC pipeline, query-based variants, and Foreign Catalog connectors are also GA; Postgres CDC and gateway-based MySQL CDC are Public Preview. The others are production-supported but covered briefly here; see the [connector reference](https://docs.databricks.com/ingestion/lakeflow-connect/) for their setup until deep coverage lands in a follow-up.
+SQL Server (cloud and on-prem) is the GA database connector, as standard or integrated CDC. Postgres CDC is Public Preview and covered below. Release stages change often: check the [connector reference](https://docs.databricks.com/ingestion/lakeflow-connect/) for current status. MySQL CDC and Foreign Catalog connectors are Public Preview and covered briefly; see the [connector reference](https://docs.databricks.com/ingestion/lakeflow-connect/) for their setup.
+
+**Query-based connectors don't use a gateway** — they're a single serverless pipeline. See [3-query-based-connectors.md](3-query-based-connectors.md).
+
+---
+
+## Integrated CDC (default) vs standard CDC
+
+There are two ways to run a database CDC connector:
+
+- **Integrated CDC:** one pipeline. Extraction runs inside each pipeline update, so there's no always-on gateway. The pipeline points at the UC connection with `connection_name` and sets `connector_type: CDC`.
+- **Standard CDC:** two pipelines, an always-on ingestion gateway plus an ingestion pipeline that references it by `ingestion_gateway_id`. See [The gateway pattern](#the-gateway-pattern) below.
+
+**Which one to build:**
+- The user asks for CDC and doesn't say which kind → **integrated**, where the source supports it.
+- The user asks for "standard CDC", "two-pipeline CDC", or "gateway" → **standard**.
+- The source doesn't support integrated CDC (check the docs; PostgreSQL had no integrated CDC when this was written) → say so, and offer standard CDC. Don't switch silently: standard runs an always-on gateway, which costs more.
+
+**Check current status before you build.** Integrated CDC is changing quickly: which sources support it, release stage, classic vs serverless compute, the runtime channel, and how long updates run all change from release to release. Treat the table below as a starting point, not the answer. Before creating a pipeline, fetch the current page for the source (or find it from `https://docs.databricks.com/llms.txt`, see **databricks-docs**) and use what it says:
+
+| Source | Integrated CDC page | Last seen |
+|---|---|---|
+| SQL Server | [sql-server-integrated-pipeline](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/sql-server-integrated-pipeline) | GA |
+| MySQL | [mysql-integrated-pipeline](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/mysql-integrated-pipeline) | Beta |
+| Oracle | [oracle-integrated-overview](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/oracle-integrated-overview) | Beta |
+| PostgreSQL | none yet: standard CDC only | — |
+| All | [smart-closure](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/smart-closure): how long an update runs | — |
+
+From the page, check: release stage, whether it needs `channel: PREVIEW`, whether it supports serverless, classic, or both, and the source prerequisites. If a source now has an integrated CDC page that isn't listed here, use it. If the docs can't be fetched, say so and follow the table above as written. For a source marked "none yet", don't try integrated CDC: offer standard CDC. Don't add settings the table doesn't list (for example, only set `channel: PREVIEW` where the table or docs page requires it). Then let the workspace correct you.
+
+**The workspace's error wins over the docs and this skill.** For example, a workspace that enforces serverless rejects `serverless: false` with "You must use serverless compute in this workspace". Set `serverless: true` and retry. If it rejects `connector_type: CDC`, integrated CDC isn't enabled on that workspace (the Databricks account team turns it on): tell the user rather than falling back to standard CDC.
+
+### Source prerequisites
+
+The source setup is the same as for standard CDC:
+
+- **SQL Server:** CDC or change tracking enabled on each table ([below](#sql-server-change-tracking-vs-cdc)), on the **primary** instance (no read replicas). SCD Type 2 needs CDC, not change tracking.
+- **MySQL:** binary log on, with `binlog_format=ROW` and `binlog_row_image=FULL`.
+
+Check through the existing connection with `remote_query` (read-only), using the same `--file` pattern as Step 0 in [3-query-based-connectors.md](3-query-based-connectors.md):
+
+```sql
+-- SQL Server: per-table CDC / change tracking status in one database
+SELECT * FROM remote_query('<connection>', database => '<database>', query => "
+  SELECT s.name AS table_schema, t.name AS table_name, t.is_tracked_by_cdc,
+         CASE WHEN ct.object_id IS NULL THEN 0 ELSE 1 END AS change_tracking
+    FROM sys.tables t JOIN sys.schemas s ON s.schema_id = t.schema_id
+    LEFT JOIN sys.change_tracking_tables ct ON ct.object_id = t.object_id
+   WHERE s.name = '<schema>'")
+```
+
+```sql
+-- MySQL: binlog settings
+SELECT * FROM remote_query('<connection>', query => "SELECT @@log_bin AS log_bin, @@binlog_format AS binlog_format, @@binlog_row_image AS binlog_row_image")
+```
+
+A table with neither CDC nor change tracking can't be ingested with CDC: enable it at the source (ask first; it's a change to the customer's database), or use query-based for that table.
+
+### Pipeline
+
+One pipeline per source. Create the destination schema and a staging schema first; the pipeline creates a staging volume in the staging schema, so it needs `CREATE VOLUME` there.
+
+These fields are stable: `connection_name`, `connector_type: CDC`, `objects`, and `data_staging_options`. Set `serverless` and `channel` from the current docs page and the workspace, as above.
+
+```yaml
+resources:
+  pipelines:
+    sqlserver_cdc:
+      name: <base>                     # <firstname><lastname>-<connection>, see SKILL.md
+      catalog: ${var.catalog}
+      schema: sqlserver_cdc_raw
+      serverless: true                 # per the current docs and the workspace's compute policy
+      ingestion_definition:
+        connection_name: my_sqlserver_connection
+        connector_type: CDC
+        objects:
+          - table:
+              source_catalog: <database>
+              source_schema: dbo
+              source_table: customers
+              destination_catalog: ${var.catalog}
+              destination_schema: sqlserver_cdc_raw
+              table_configuration:
+                scd_type: SCD_TYPE_1     # SCD_TYPE_2 needs SQL Server CDC, not change tracking
+        data_staging_options:
+          catalog_name: ${var.catalog}
+          schema_name: sqlserver_cdc_staging
+```
+
+For MySQL, address tables by `source_schema: <mysql-database>` with no `source_catalog`, and add `channel: PREVIEW` while the docs page requires it:
+
+```yaml
+    mysql_cdc:
+      name: <base>
+      channel: PREVIEW                 # while the MySQL page says it's required
+      catalog: ${var.catalog}
+      schema: mysql_cdc_raw
+      serverless: true                 # per the current docs and the workspace's compute policy
+      ingestion_definition:
+        connection_name: my_mysql_connection
+        connector_type: CDC
+        objects:
+          - table:
+              source_schema: <mysql-database>
+              source_table: orders
+              destination_catalog: ${var.catalog}
+              destination_schema: mysql_cdc_raw
+        data_staging_options:
+          catalog_name: ${var.catalog}
+          schema_name: mysql_cdc_staging
+```
+
+### How an update runs: smart closure
+
+Integrated CDC updates are triggered, but they don't stop as soon as the backlog is empty. [Smart closure](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/smart-closure) decides when an update ends:
+
+1. **Minimum runtime first.** No update ends before it.
+2. **Then, once caught up,** it ends (logged as `lag-converged`).
+3. **Or at the maximum runtime,** if it hasn't caught up (logged as `max-runtime-cap-hit`). The next update resumes from there.
+4. **Or on a source schema change.** The update stops and a new one starts with the new schema.
+
+Databricks sets and adjusts the minimum runtime, maximum runtime, and lag threshold, and they aren't configurable. Don't quote fixed durations. What it means in practice:
+
+- **Each update can run much longer than a standard CDC ingestion run,** even with nothing to apply. That's expected, not a hang. In one test, a SQL Server update took about 21 minutes for a snapshot of about 6k rows, ending with "CDC extraction has COMPLETED. Caught up to the source." A MySQL source with no writes kept logging "MySQL binlog stall detected" and was still running after 79 minutes, because the lag couldn't converge on an idle source. Expect an idle source to run until the maximum runtime. In tests and demos, stop it yourself after a set time with `databricks pipelines stop <pipeline-id>`. That cancels the update, and the next update resumes from where it stopped.
+- **Don't block on it.** Start the update with `databricks bundle run <key> --no-wait` (or `pipelines start-update`), tell the user it's running, and check it with `databricks pipelines get-update <pipeline-id> <update-id>` until it's `COMPLETED` or `FAILED`. If you have to stop before it finishes, report the update ID and how to check it.
+- **What it's doing, and why it stopped:** extraction progress and the closure decision are logged as `operation_progress` and `cdc_extraction_details` events. A running update reports something like "CDC extraction is IN_PROGRESS, running for 5 minutes. Zero snapshots are pending. Will stop once the lag converges." Source-side conditions show up too, such as "MySQL binlog stall detected" on an idle source. Query by event type, not by message text, since the wording changes:
+
+  ```sql
+  SELECT timestamp, event_type, message FROM event_log('<pipeline-id>')
+  WHERE event_type IN ('operation_progress', 'cdc_extraction_details', 'update_progress')
+  ORDER BY timestamp DESC LIMIT 20
+  ```
+
+- **Schedule** it with a Jobs `pipeline_task`. Use the interval the smart closure page recommends (it currently suggests starting at 60 minutes). A trigger that fires while an update is still running is skipped. Continuous mode exists as a separate option; check its status in the docs.
+
+### Behaviour that doesn't change between releases
+
+- **The first update takes the initial snapshot,** then later updates apply changes.
+- **Tables without a primary key** are keyed on all columns, so identical rows collapse: the table ends up with one row per distinct row. Use SCD Type 2 or add a key at the source if duplicates matter.
+- **Immutable after create:** `connection_name` and `connector_type` can't be changed. Create a new pipeline instead.
+- **Purged change logs** (CDC retention, change-tracking retention, or binlog expiry) before the pipeline reads them need a full refresh. Schedule runs well inside the retention period.
+
+Report rows per table per run with the query in [5-troubleshooting-and-monitoring.md](5-troubleshooting-and-monitoring.md#rows-per-table-per-run-snapshot-inserts-upserts-deletes).
 
 ---
 
 ## The gateway pattern
 
-Database connectors are **not** pure serverless. They split into two pipelines:
+Standard CDC splits into two pipelines (the compute options for each change between releases; check the connector's docs page):
 
 ```
           ┌───────────────────────┐
@@ -84,7 +226,7 @@ A DAB stub with both pipelines:
 resources:
   pipelines:
     sqlserver_gateway:
-      name: sqlserver_gateway
+      name: <base>-gw                  # <firstname><lastname>-<connection>-gw, see SKILL.md
       gateway_definition:
         connection_name: my_sqlserver_connection
         gateway_storage_catalog: ${var.catalog}
@@ -92,7 +234,7 @@ resources:
         gateway_storage_name: sqlserver_gateway_storage
 
     sqlserver_ingestion:
-      name: sqlserver_to_uc
+      name: <base>-ap                  # same number as the gateway if you add one (-gw-2 / -ap-2)
       ingestion_definition:
         ingestion_gateway_id: ${resources.pipelines.sqlserver_gateway.id}
         objects:
@@ -120,6 +262,14 @@ The gateway compute itself runs on Databricks-managed VPC infrastructure inside 
 
 ---
 
+## Workspace feature gates (all database sources)
+
+Each standard CDC source is enabled per workspace. When it isn't, the gateway create fails with `Ingestion source '<SOURCE>' is not supported in your workspace. Please contact Databricks support to enable this feature for your workspace. (403 PERMISSION_DENIED)`. This has been seen for `POSTGRESQL` and `MYSQL` on a workspace where query-based and integrated CDC for the same sources worked. Report it, don't work around it, and offer what does work there (integrated CDC or query-based). A failed `bundle deploy` can still have created the schemas declared before the pipelines: offer `bundle destroy` so nothing is left behind.
+
+The workspace's compute policy also wins. A workspace that requires serverless rejects a classic gateway with "You must use serverless compute in this workspace": set `serverless: true` on the gateway and redeploy.
+
+---
+
 ## Database-specific gotchas
 
 | Symptom | Likely cause | Fix |
@@ -132,13 +282,114 @@ The gateway compute itself runs on Databricks-managed VPC infrastructure inside 
 
 ---
 
-## Other database connectors (brief)
+## PostgreSQL CDC
 
-The following are production-supported but ship more pattern variance than SQL Server. Use the [connector reference](https://docs.databricks.com/ingestion/lakeflow-connect/) for current setup steps:
+Same gateway pattern as SQL Server. Postgres logical replication (`pgoutput`) replaces CT/CDC. Supports PostgreSQL 13+, including RDS / Aurora, Azure Database for PostgreSQL Flexible Server, and Cloud SQL.
 
-- **Postgres CDC, gateway-based MySQL CDC** (Public Preview): same gateway pattern as SQL Server; logical decoding (Postgres) or binlog (MySQL) replaces CT/CDC.
-- **MySQL integrated CDC pipeline** (GA): one pipeline combines extraction and application, so no separate ingestion gateway is needed ([docs](https://docs.databricks.com/ingestion/lakeflow-connect/mysql-integrated-pipeline)).
-- **Oracle / Teradata / SQL Server / Postgres / MySQL query-based** (GA): no gateway; the connector issues periodic queries instead of reading a change feed. Trade-off: simpler, but higher source load and no per-event history.
-- **Snowflake / Redshift / Synapse / BigQuery (Foreign Catalog)** (GA): Lakeflow Connect creates the foreign catalog and materializes the queried subset to Delta. Most useful for warehouse-to-lakehouse migration scenarios.
+### Source setup
 
-Deep coverage for these connectors will land as they stabilize.
+Run as an admin or the table owner — the replication user can't create its own grants or publications.
+
+```sql
+SHOW wal_level;                       -- must be 'logical' (RDS/Aurora: rds.logical_replication = 1)
+
+CREATE USER databricks_replication WITH PASSWORD '<strong-generated-password>';
+GRANT CONNECT ON DATABASE <db> TO databricks_replication;
+GRANT USAGE ON SCHEMA <schema> TO databricks_replication;
+GRANT SELECT ON TABLE <schema>.<table> TO databricks_replication;
+ALTER USER databricks_replication WITH REPLICATION;
+-- RDS/Aurora only: GRANT rds_replication TO databricks_replication;
+
+-- Tables with a PK and no large TOASTable columns: DEFAULT. Otherwise (or no PK): FULL.
+ALTER TABLE <schema>.<table> REPLICA IDENTITY DEFAULT;
+
+-- One publication per pipeline, created before the slot. List only this pipeline's tables.
+-- Name it after the pipeline (e.g. <dest_schema>_pub); never share one between pipelines.
+CREATE PUBLICATION <dest_schema>_pub FOR TABLE <schema>.<table1>, <schema>.<table2>;
+
+-- One slot per pipeline, created by the replication role. Only pgoutput is supported.
+-- A slot has one consumer at a time, so two pipelines can never share one.
+-- Create it after the pipelines deploy, so a rejected pipeline doesn't leave an unused slot holding WAL.
+SET ROLE databricks_replication;
+SELECT pg_create_logical_replication_slot('<dest_schema>', 'pgoutput');
+RESET ROLE;
+```
+
+Server parameters:
+
+- `max_slot_wal_keep_size` — set a finite value. `-1` lets a stalled slot keep WAL forever and fill the disk.
+- `max_replication_slots` / `max_wal_senders` — at least one per replicated database on top of existing use.
+
+### Pipelines
+
+The UC connection uses `connection_type: POSTGRESQL` with the replication user's credentials. The ingestion pipeline names the slot and publication per source database:
+
+```yaml
+resources:
+  pipelines:
+    pg_gateway:
+      name: <base>-gw
+      gateway_definition:
+        connection_name: my_pg_connection
+        gateway_storage_catalog: ${var.catalog}
+        gateway_storage_schema: ingestion_staging
+        gateway_storage_name: pg_gateway_storage
+
+    pg_ingestion:
+      name: <base>-ap
+      ingestion_definition:
+        ingestion_gateway_id: ${resources.pipelines.pg_gateway.id}
+        source_type: POSTGRESQL
+        source_configurations:
+          - catalog:
+              source_catalog: <db>
+              postgres:
+                slot_config:
+                  slot_name: <dest_schema>           # this pipeline's own slot
+                  publication_name: <dest_schema>_pub  # this pipeline's own publication
+        objects:
+          - table:
+              source_catalog: <db>
+              source_schema: public
+              source_table: orders
+              destination_catalog: ${var.catalog}
+              destination_schema: pg_raw
+```
+
+Check the `source_configurations` shape against the [connector reference](https://docs.databricks.com/ingestion/lakeflow-connect/) for your CLI version — it is Public Preview and may change.
+
+**Each pipeline needs its own publication and slot.** The gateway doesn't create either one, and a slot can't be shared. If all you have is the UC connection, create and drop the slot with the notebook in [7-source-sql-through-connection.md](7-source-sql-through-connection.md). `CREATE PUBLICATION` can't go through the connection, so the user runs that one statement.
+
+### Verify the source before creating the gateway
+
+```sql
+SELECT rolname, rolreplication FROM pg_roles WHERE rolname = 'databricks_replication';
+SELECT * FROM pg_publication WHERE pubname = '<dest_schema>_pub';
+SELECT slot_name, plugin, active, restart_lsn FROM pg_replication_slots;
+SELECT c.relname, c.relreplident FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = '<schema>' AND c.relkind = 'r';   -- 'd' (DEFAULT) or 'f' (FULL)
+```
+
+### Postgres-specific gotchas
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Source disk filling up | Gateway stopped or deleted; the slot keeps holding WAL | Restart the gateway, or drop that pipeline's slot. Set a finite `max_slot_wal_keep_size`. |
+| Slot left behind after deleting the pipeline | Slots aren't dropped automatically | `SELECT pg_drop_replication_slot('<dest_schema>');`, or `action: drop_slot` in [7-source-sql-through-connection.md](7-source-sql-through-connection.md). Drop only your own slot, by name. |
+| Updates / deletes missing columns | `REPLICA IDENTITY DEFAULT` on a table without a PK or with TOASTed columns | `ALTER TABLE ... REPLICA IDENTITY FULL`. |
+| Table not replicating | Not in the publication | `ALTER PUBLICATION <dest_schema>_pub ADD TABLE <schema>.<table>;` |
+| Gateway create fails: "Ingestion source 'POSTGRESQL' is not supported in your workspace" (403) | Postgres CDC isn't enabled on this workspace (query-based Postgres can still work) | Ask the Databricks account team or support to enable it. Don't work around it. If you already created a slot, drop it. The deploy may have created the destination and staging schemas before failing: offer `bundle destroy` to remove them. |
+| Slot creation fails | Wrong role, or `wal_level` not `logical` | Create the slot as the `REPLICATION` role, after the publication, with `pgoutput`. |
+
+Using Lakebase as the Postgres source for a demo: see [6-lakebase-as-postgres-source.md](6-lakebase-as-postgres-source.md). For CDC on Lakebase, try creating the publication first: if Lakebase refuses it ("CREATE PUBLICATION is not enabled on this Lakebase instance"), CDC can't run there yet, so use query-based.
+
+---
+
+## Other Public Preview database connectors (brief)
+
+Use the [connector reference](https://docs.databricks.com/ingestion/lakeflow-connect/) for current setup steps:
+
+- **MySQL CDC** — same gateway pattern; binlog replaces CT/CDC.
+- **Oracle / Teradata / SQL Server / Postgres / MySQL / MariaDB query-based** — no gateway; see [3-query-based-connectors.md](3-query-based-connectors.md).
+- **Snowflake / Redshift / Synapse / BigQuery (Foreign Catalog)** — Lakeflow Connect creates the foreign catalog and materializes the queried subset to Delta. Most useful for warehouse-to-lakehouse migration scenarios.

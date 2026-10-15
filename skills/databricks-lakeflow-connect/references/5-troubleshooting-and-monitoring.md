@@ -6,7 +6,7 @@ This reference covers what to check when an ingestion pipeline misbehaves: where
 
 ## Where to look first
 
-Every Lakeflow Connect pipeline emits a structured event log. For SaaS pipelines that's the only artifact; for database pipelines you'll also want to inspect the gateway pipeline's events.
+Every Lakeflow Connect pipeline emits a structured event log. For SaaS and query-based pipelines that's the only artifact; for gateway-based database pipelines (CDC) you'll also want to inspect the gateway pipeline's events.
 
 The event log is a Delta table on the pipeline. Query it through SQL:
 
@@ -21,7 +21,170 @@ LIMIT 50;
 
 For event-log table conventions (filtering by `event_type`, joining with metrics, etc.), see **databricks-pipelines**.
 
-**Database pipelines have two event logs** — one for the gateway, one for the ingestion pipeline. A symptom on the ingestion side often has its root cause in the gateway side. When debugging database connectors, query both.
+**Gateway-based database pipelines have two event logs** — one for the gateway, one for the ingestion pipeline. A symptom on the ingestion side often has its root cause in the gateway side. When debugging database connectors, query both.
+
+---
+
+## Rows per table per run (snapshot inserts, upserts, deletes)
+
+Use this when the user asks what each run did: how many rows each table took in its snapshot, upserted, appended, or deleted, and whether that run was a snapshot, a full refresh, or incremental. It works for query-based, integrated CDC, and standard CDC (run it on the ingestion pipeline, `-ap`) pipelines. It reads only the event log and returns in a few seconds.
+
+Write the query below to `rows_per_run.sql` with your file tool, replacing `<pipeline-id>`. Then run it:
+
+```bash
+databricks experimental aitools tools query --file rows_per_run.sql --profile <PROFILE>
+```
+
+Pass the SQL with `--file`: an inline query that starts with a `--` comment is parsed as a CLI flag. For a bundle-deployed pipeline, get the ID with `databricks bundle summary -o json --profile <PROFILE>` (under `resources.pipelines.<key>.id`).
+
+```sql
+-- Rows per table per run: snapshot inserts, upserts, appends, deletes
+WITH ev AS (
+  SELECT * FROM event_log('<pipeline-id>')
+),
+runs AS (
+  SELECT origin.update_id,
+         min(timestamp) AS started,
+         max_by(details:update_progress.state::string, timestamp)
+           FILTER (WHERE event_type = 'update_progress') AS state,
+         max(details:create_update.full_refresh::boolean) AS full_refresh_all,
+         max(details:create_update.full_refresh_selection::string) AS full_refresh_sel
+  FROM ev
+  WHERE event_type IN ('create_update', 'update_progress')
+  GROUP BY 1
+),
+flow_rows AS (
+  -- Per-table flows, by pipeline type:
+  --   query-based:     <catalog>.<schema>.<catalog>_<schema>_<table>[_upsert]   (_upsert = SCD1/SCD2, none = APPEND_ONLY)
+  --   integrated CDC:  <catalog>.<schema>.applier_<catalog>_<schema>_<table>_{snapshot|cdc}_flow
+  --   standard CDC:    <catalog>.<schema>.<catalog>_<schema>_<table>_{snapshot|cdc}_flow   (ingestion pipeline)
+  -- Skips _staging, extractor_*, cdc_staging_table, and internal timing-only flows.
+  SELECT origin.update_id, origin.flow_name,
+         CASE WHEN origin.flow_name RLIKE '^([^.]+)\\.([^.]+)\\.(applier_)?\\1_\\2_.+_(snapshot|cdc)_flow$'
+              THEN regexp_extract(origin.flow_name, '^([^.]+)\\.([^.]+)\\.(applier_)?\\1_\\2_(.+)_(snapshot|cdc)_flow$', 4)
+              ELSE regexp_extract(origin.flow_name, '^([^.]+)\\.([^.]+)\\.\\1_\\2_(.+?)(_upsert)?$', 3) END AS tbl,
+         origin.flow_name RLIKE '\\.applier_' AS is_integrated,
+         CASE WHEN origin.flow_name LIKE '%\\_snapshot\\_flow' THEN 'cdc snapshot'
+              WHEN origin.flow_name LIKE '%\\_cdc\\_flow' THEN 'cdc changes'
+              WHEN origin.flow_name LIKE '%\\_upsert' THEN 'upsert'
+              ELSE 'append' END AS kind,
+         coalesce(details:flow_progress.metrics.num_upserted_rows::bigint, 0) AS upserted,
+         coalesce(details:flow_progress.metrics.num_output_rows::bigint, 0) AS output_rows,
+         coalesce(details:flow_progress.metrics.num_deleted_rows::bigint, 0) AS deleted
+  FROM ev
+  WHERE event_type = 'flow_progress'
+    AND origin.flow_name RLIKE '^([^.]+)\\.([^.]+)\\.(applier_)?\\1_\\2_.+$'
+),
+qbc_offsets AS (
+  -- query-based only: the first batch's start offset; no incrementalOffset means a snapshot
+  SELECT origin.update_id, origin.flow_name,
+         min_by(get_json_object(details:stream_progress.progress_json::string,
+                                '$.sources[0].startOffset.incrementalOffset'), timestamp) AS start_cursor
+  FROM ev
+  WHERE event_type = 'stream_progress'
+  GROUP BY 1, 2
+),
+per_table AS (
+  SELECT f.update_id, f.tbl,
+         max(f.kind IN ('cdc snapshot', 'cdc changes')) AS is_cdc,
+         max(f.is_integrated) AS is_integrated,
+         max(f.kind = 'append') AS is_append,
+         -- query-based: did any batch run, and did it start without a saved cursor?
+         max(o.flow_name IS NOT NULL) AS qbc_batch,
+         max(o.flow_name IS NOT NULL AND o.start_cursor IS NULL) AS qbc_snapshot,
+         sum(CASE WHEN f.kind = 'cdc snapshot' THEN f.upserted ELSE 0 END) AS cdc_snapshot_rows,
+         sum(CASE WHEN f.kind IN ('cdc changes', 'upsert') THEN f.upserted ELSE 0 END) AS upserted,
+         sum(CASE WHEN f.kind = 'append' THEN f.output_rows ELSE 0 END) AS appended,
+         sum(f.deleted) AS deleted
+  FROM flow_rows f
+  LEFT JOIN qbc_offsets o ON o.update_id = f.update_id AND o.flow_name = f.flow_name
+  GROUP BY 1, 2
+),
+labeled AS (
+  SELECT r.started, r.update_id, r.state,
+         t.tbl, t.is_cdc, t.is_integrated, t.is_append, t.qbc_batch, t.qbc_snapshot,
+         t.cdc_snapshot_rows, t.upserted, t.appended, t.deleted,
+         coalesce(r.full_refresh_all, false)
+           OR coalesce(array_contains(from_json(r.full_refresh_sel, 'array<string>'), t.tbl), false) AS is_full_refresh
+  FROM runs r
+  LEFT JOIN per_table t ON t.update_id = r.update_id   -- keep runs that failed before any table started
+)
+SELECT date_format(started, 'yyyy-MM-dd HH:mm:ss') AS run_started,
+       left(update_id, 8) AS update_id,
+       state,
+       coalesce(tbl, '(no table ran)') AS table_name,
+       CASE WHEN tbl IS NULL THEN NULL
+            WHEN is_cdc AND is_integrated THEN 'integrated cdc'
+            WHEN is_cdc THEN 'standard cdc'
+            WHEN is_append THEN 'query-based append'
+            ELSE 'query-based upsert' END AS pipeline_mode,
+       CASE WHEN tbl IS NULL THEN 'none'
+            WHEN is_full_refresh THEN 'full refresh'
+            WHEN is_cdc AND cdc_snapshot_rows > 0 AND upserted + deleted > 0 THEN 'snapshot + changes'
+            WHEN is_cdc AND cdc_snapshot_rows > 0 THEN 'snapshot'
+            WHEN is_cdc AND upserted + deleted > 0 THEN 'incremental'
+            WHEN is_cdc THEN 'no new data'
+            WHEN NOT qbc_batch THEN 'no new data'
+            WHEN qbc_snapshot THEN 'snapshot'
+            ELSE 'incremental' END AS run_type,
+       -- query-based snapshots and full refreshes count their rows as snapshot inserts
+       CASE WHEN is_cdc THEN cdc_snapshot_rows
+            WHEN is_full_refresh OR qbc_snapshot THEN upserted + appended
+            ELSE 0 END AS snapshot_inserted,
+       CASE WHEN NOT is_cdc AND (is_full_refresh OR qbc_snapshot) THEN 0 ELSE upserted END AS upserted,
+       CASE WHEN NOT is_cdc AND (is_full_refresh OR qbc_snapshot) THEN 0 ELSE appended END AS appended,
+       deleted
+FROM labeled
+ORDER BY started, table_name
+```
+
+Show the result as one table per run (or one row per table for the latest run only, if that's what the user asked about). Columns:
+
+| Column | Meaning |
+|---|---|
+| `pipeline_mode` | `integrated cdc`, `standard cdc`, `query-based upsert` (SCD1/SCD2), or `query-based append` (`APPEND_ONLY`) |
+| `run_type` | `snapshot`, `snapshot + changes` (integrated CDC: snapshot and change rows in one update), `incremental`, `full refresh`, `no new data`, or `none` (the run failed before any table started) |
+| `snapshot_inserted` | Rows loaded by the initial snapshot or a full refresh |
+| `upserted` | Change rows inserted or updated after the snapshot |
+| `appended` | New rows on an `APPEND_ONLY` table after the snapshot |
+| `deleted` | Deletes applied: source deletes for CDC, `deletion_condition` soft deletes for query-based |
+
+Where the numbers come from:
+
+- **Query-based:** each table has one flow, `<catalog>.<schema>.<catalog>_<schema>_<table>`. SCD tables add an `_upsert` suffix and report `num_upserted_rows` and `num_deleted_rows`. `APPEND_ONLY` tables have no suffix and report `num_output_rows`. There's no separate snapshot metric: a run counts as a snapshot when its first batch started with no saved cursor (`stream_progress` → `sources[0].startOffset.incrementalOffset`).
+- **Integrated and standard CDC:** each table has a snapshot flow and a change flow. Integrated CDC prefixes them with `applier_` (`applier_<catalog>_<schema>_<table>_snapshot_flow` / `..._cdc_flow`). The standard CDC ingestion pipeline uses the same names without the prefix. The snapshot flow reports the snapshot rows, and the change flow reports `num_upserted_rows` and `num_deleted_rows`. The query skips the `extractor_*` flows (rows read from the source) and the shared `cdc_staging_table`.
+- **Skipped as well:** the per-table `_staging` flows and the internal `pipelines.flowTimeMetrics.missingFlowName` flow. They carry only timings.
+
+Things to tell the user:
+
+- **Running updates report partial counts.** An integrated CDC update keeps running until smart closure ends it (see [2-database-connectors.md](2-database-connectors.md#how-an-update-runs-smart-closure)), so re-run the query after it completes.
+- **Failed runs still report** what each table loaded before the failure. A run that failed before any table started shows one `(no table ran)` row; pull its error with the `level IN ('ERROR', 'WARN')` query above.
+- **No primary key under CDC (integrated or standard):** the table is keyed on all columns, so identical source rows collapse. The snapshot count can be far below the source row count. Use SCD Type 2, or add a key at the source.
+- **Query-based SCD2 counts aren't change counts.** On query-based SCD2 tables, `num_upserted_rows` came out at about the table's row count plus the changes, on every incremental run (1,002 and 1,021 upserts for 2 and 30 real changes). Soft deletes close the current version, so they don't show up in `deleted` (0 for 10 soft deletes). SCD1 tables matched the source changes exactly (20 upserts and 10 deletes for 10 inserts, 10 updates, and 10 soft deletes). For SCD2, count the changes from the table instead, with the query below.
+
+---
+
+### Changes on an SCD2 table, counted from the table
+
+Every SCD2 version carries `__START_AT` and `__END_AT`, which come from the sequencing value (the cursor column for query-based, the change-log position for CDC). Group by key to count what changed since a point in time. Use when the changes were made, or the start of the previous run. Tested against generated DML: 10 inserts, 10 updates, and 10 soft deletes came back as exactly 10 / 10 / 10.
+
+```sql
+WITH k AS (
+  SELECT <key> AS key,
+         min(__START_AT) AS first_start,
+         count_if(__START_AT >= TIMESTAMP '<since>') AS started,
+         count_if(__END_AT IS NULL) AS open_now,
+         count_if(__END_AT >= TIMESTAMP '<since>') AS closed
+  FROM <catalog>.<schema>.<table>
+  GROUP BY <key>
+)
+SELECT count_if(first_start >= TIMESTAMP '<since>') AS inserted,
+       count_if(first_start <  TIMESTAMP '<since>' AND started > 0) AS updated,
+       count_if(closed > 0 AND open_now = 0) AS deleted
+FROM k
+```
+
+For a composite key, use `struct(<col1>, <col2>) AS key`. Report these numbers for SCD2 tables next to the rows-per-run report, and say which one is the source-change count.
 
 ---
 
@@ -37,6 +200,10 @@ For event-log table conventions (filtering by `event_type`, joining with metrics
 | Gateway pipeline fails: instance type unavailable in region | Default gateway cluster shape isn't stocked in the target region. | Apply a cluster policy override on the gateway pipeline to pin a regionally-available instance type. |
 | Pipeline runs but the destination table never updates | UC `CONNECTION` not in `READY` state, OR destination schema missing. | `DESCRIBE CONNECTION <name>` — state must be `READY`. Verify the destination schema exists and the pipeline's service principal has `CREATE TABLE` + `MODIFY`. |
 | OAuth U2M connection refreshes fail after weeks of working | Refresh token expired or revoked at the SaaS source. | Re-open the connection in Catalog Explorer and re-authorize. Plan for periodic re-auth if the SaaS source enforces a refresh-token lifetime. |
+| Query-based: source updates never land | Cursor column not bumped on UPDATE, or NULL cursor values. | Add an update trigger on the cursor column and make it `NOT NULL`. See [3-query-based-connectors.md](3-query-based-connectors.md). |
+| Query-based: every run reloads the full table | No `cursor_columns` set, or the cursor isn't monotonic. | Set a single monotonic cursor (prefer an update timestamp). |
+| Query-based: deleted source rows remain | Hard `DELETE` at the source is invisible to a query-based pull. | Use soft deletes with `deletion_condition`, the Beta hard-delete option, or a CDC connector. |
+| Postgres connection to Lakebase works, then fails about an hour later | The connection password is a Lakebase OAuth token (1-hour lifetime). | Use a native Postgres password role. See [6-lakebase-as-postgres-source.md](6-lakebase-as-postgres-source.md). |
 | Connector requires `channel: PREVIEW` at pipeline create | The connector runs only on the preview SDP runtime channel. | Set `channel: PREVIEW` as the connector's docs instruct — it selects the runtime channel, not the connector's GA status. GA connectors run on `CURRENT` (omit it); if gateway startup is slow, `CURRENT` is faster where supported. |
 
 ---

@@ -136,6 +136,84 @@ reinstall from another source. Verified empirically (2026-06). Listing the
 plugin on an additional marketplace, such as Anthropic's official directory,
 is additive and never replaces the entry here.
 
+## Exporting skill changes from a sandbox
+
+When editing skills in a Claude Code sandbox (Omnigent, Solution Builder, etc.) that has no git push access, use a Databricks workspace as a file bridge. The sandbox CLI profile is typically pre-configured; check `databricks auth profiles`.
+
+**Preferred: upload individual files (not a patch).** The workspace notebook format corrupts `git format-patch` output -- context lines shift, special characters get mangled, and `git apply` fails. Upload each changed file separately instead.
+
+**In the sandbox:**
+
+```bash
+cd databricks-agent-skills
+PROFILE="${OMNIGENT_WS:-DEFAULT}"
+WS_BASE="/Users/<email>/skill-files"
+
+# Create workspace dirs matching the repo structure
+databricks workspace mkdirs "$WS_BASE/skills/<skill-name>/references" --profile $PROFILE
+
+# Upload each changed file
+for f in CLAUDE.md manifest.json skills/<skill-name>/SKILL.md skills/<skill-name>/references/*.md; do
+  databricks workspace import "$WS_BASE/$f" \
+    --file "$f" --format SOURCE --language PYTHON \
+    --profile $PROFILE --overwrite
+done
+```
+
+**On the laptop:**
+
+```bash
+cd databricks-agent-skills
+git checkout -b <branch>
+
+PROFILE="<omnigent-profile>"
+WS_BASE="/Users/<email>/skill-files"
+
+# Download each file, stripping the notebook header
+for f in \
+  CLAUDE.md \
+  manifest.json \
+  skills/<skill-name>/SKILL.md \
+  skills/<skill-name>/references/2-database-connectors.md \
+  skills/<skill-name>/references/3-new-file.md
+do
+  mkdir -p "$(dirname "$f")"
+  databricks workspace export "$WS_BASE/$f" --profile "$PROFILE" > "$f.tmp"
+  tail -n +2 "$f.tmp" > "$f"    # strip "# Databricks notebook source" header
+  rm "$f.tmp"
+done
+
+python3 scripts/skills.py generate
+python3 scripts/skills.py validate
+```
+
+**Gotchas:**
+
+- `workspace import --format SOURCE` stores every file as a notebook, prepending `# Databricks notebook source`. Always `tail -n +2` after export.
+- Avoid em-dash and other non-ASCII in shell scripts uploaded this way -- the notebook round-trip can mangle them. Use `--` instead of `--`.
+- Do not use `git format-patch` through the workspace bridge. The notebook format corrupts diff context lines, causing `git apply` to fail with "patch does not apply". Upload individual files instead.
+
+## Testing skill changes
+
+End-to-end skill tests (headless Claude sessions that deploy into a real workspace) live in a separate repo, [rsleedbx/databricks-agent-skills-tests](https://github.com/rsleedbx/databricks-agent-skills-tests), so test scripts, prompts, and results stay out of this one. The hook unit tests stay here, under `tests/`.
+
+Check it out next to this repo, then:
+
+```bash
+cd ../databricks-agent-skills-tests
+cp env.example.sh env.local.sh        # profiles, catalog, connections (gitignored)
+source env.sh
+./run.sh ../databricks-agent-skills prompts/lakeflow-connect.txt   # guidance prompts, no resources created
+./summarize.py /tmp/lakeflow-connect-results
+bin/run_batch.sh prompts/lfc-matrix/qbc-*.txt                      # deploy tests (billable resources)
+```
+
+Key details:
+
+- Claude loads skills from its **plugin cache**, not local repo files. The runner copies this repo's `skills/` into the cache before each run.
+- `PIPELINE_WS` is passed to Claude as `DATABRICKS_CONFIG_PROFILE` so the Databricks skill targets the right workspace (for example the one running Lakebase or LFC pipelines).
+- `--verbose --output-format stream-json` is required (`stream-json` fails without `--verbose`).
+
 ## Security
 
 When documenting examples, obfuscate sensitive info:
