@@ -58,13 +58,19 @@ flow_rows AS (
   --   query-based:     <catalog>.<schema>.<catalog>_<schema>_<table>[_upsert]   (_upsert = SCD1/SCD2, none = APPEND_ONLY)
   --   integrated CDC:  <catalog>.<schema>.applier_<catalog>_<schema>_<table>_{snapshot|cdc}_flow
   --   standard CDC:    <catalog>.<schema>.<catalog>_<schema>_<table>_{snapshot|cdc}_flow   (ingestion pipeline)
+  --   query-based, no cursor (full load each run): <catalog>.<schema>.<table>; records no row counts
+  --   query-based hard-delete tracking: <catalog>.<schema>.<catalog>_<schema>_<table>_delete (counted into <table>)
   -- Skips _staging, extractor_*, cdc_staging_table, and internal timing-only flows.
   SELECT origin.update_id, origin.flow_name,
          CASE WHEN origin.flow_name RLIKE '^([^.]+)\\.([^.]+)\\.(applier_)?\\1_\\2_.+_(snapshot|cdc)_flow$'
               THEN regexp_extract(origin.flow_name, '^([^.]+)\\.([^.]+)\\.(applier_)?\\1_\\2_(.+)_(snapshot|cdc)_flow$', 4)
-              ELSE regexp_extract(origin.flow_name, '^([^.]+)\\.([^.]+)\\.\\1_\\2_(.+?)(_upsert)?$', 3) END AS tbl,
+              WHEN origin.flow_name RLIKE '^([^.]+)\\.([^.]+)\\.\\1_\\2_.+$'
+              THEN regexp_extract(origin.flow_name, '^([^.]+)\\.([^.]+)\\.\\1_\\2_(.+?)(_upsert|_delete)?$', 3)
+              ELSE regexp_extract(origin.flow_name, '([^.]+)$', 1) END AS tbl,
          origin.flow_name RLIKE '\\.applier_' AS is_integrated,
-         CASE WHEN origin.flow_name LIKE '%\\_snapshot\\_flow' THEN 'cdc snapshot'
+         CASE WHEN NOT origin.flow_name RLIKE '^([^.]+)\\.([^.]+)\\.(applier_)?\\1_\\2_.+$' THEN 'full load'
+              WHEN origin.flow_name LIKE '%\\_snapshot\\_flow' THEN 'cdc snapshot'
+              WHEN origin.flow_name LIKE '%\\_delete' THEN 'hard delete'
               WHEN origin.flow_name LIKE '%\\_cdc\\_flow' THEN 'cdc changes'
               WHEN origin.flow_name LIKE '%\\_upsert' THEN 'upsert'
               ELSE 'append' END AS kind,
@@ -73,7 +79,11 @@ flow_rows AS (
          coalesce(details:flow_progress.metrics.num_deleted_rows::bigint, 0) AS deleted
   FROM ev
   WHERE event_type = 'flow_progress'
-    AND origin.flow_name RLIKE '^([^.]+)\\.([^.]+)\\.(applier_)?\\1_\\2_.+$'
+    AND (origin.flow_name RLIKE '^([^.]+)\\.([^.]+)\\.(applier_)?\\1_\\2_.+$'
+         OR (origin.flow_name RLIKE '^[^.]+\\.[^.]+\\.[^.]+$'                 -- no-cursor full-load flow
+             AND origin.flow_name NOT LIKE 'pipelines.%'
+             AND origin.flow_name NOT LIKE '%.cdc\\_staging\\_table'
+             AND NOT origin.flow_name RLIKE '\\.(applier|extractor)_'))
 ),
 qbc_offsets AS (
   -- query-based only: the first batch's start offset; no incrementalOffset means a snapshot
@@ -89,9 +99,10 @@ per_table AS (
          max(f.kind IN ('cdc snapshot', 'cdc changes')) AS is_cdc,
          max(f.is_integrated) AS is_integrated,
          max(f.kind = 'append') AS is_append,
+         max(f.kind = 'full load') AS is_full_load,
          -- query-based: did any batch run, and did it start without a saved cursor?
-         max(o.flow_name IS NOT NULL) AS qbc_batch,
-         max(o.flow_name IS NOT NULL AND o.start_cursor IS NULL) AS qbc_snapshot,
+         max(o.flow_name IS NOT NULL AND f.kind <> 'hard delete') AS qbc_batch,
+         max(o.flow_name IS NOT NULL AND o.start_cursor IS NULL AND f.kind <> 'hard delete') AS qbc_snapshot,
          sum(CASE WHEN f.kind = 'cdc snapshot' THEN f.upserted ELSE 0 END) AS cdc_snapshot_rows,
          sum(CASE WHEN f.kind IN ('cdc changes', 'upsert') THEN f.upserted ELSE 0 END) AS upserted,
          sum(CASE WHEN f.kind = 'append' THEN f.output_rows ELSE 0 END) AS appended,
@@ -102,7 +113,7 @@ per_table AS (
 ),
 labeled AS (
   SELECT r.started, r.update_id, r.state,
-         t.tbl, t.is_cdc, t.is_integrated, t.is_append, t.qbc_batch, t.qbc_snapshot,
+         t.tbl, t.is_cdc, t.is_integrated, t.is_append, t.is_full_load, t.qbc_batch, t.qbc_snapshot,
          t.cdc_snapshot_rows, t.upserted, t.appended, t.deleted,
          coalesce(r.full_refresh_all, false)
            OR coalesce(array_contains(from_json(r.full_refresh_sel, 'array<string>'), t.tbl), false) AS is_full_refresh
@@ -117,9 +128,11 @@ SELECT date_format(started, 'yyyy-MM-dd HH:mm:ss') AS run_started,
             WHEN is_cdc AND is_integrated THEN 'integrated cdc'
             WHEN is_cdc THEN 'standard cdc'
             WHEN is_append THEN 'query-based append'
+            WHEN is_full_load THEN 'query-based full load'
             ELSE 'query-based upsert' END AS pipeline_mode,
        CASE WHEN tbl IS NULL THEN 'none'
             WHEN is_full_refresh THEN 'full refresh'
+            WHEN is_full_load THEN 'full load (no cursor; no row counts in the event log)'
             WHEN is_cdc AND cdc_snapshot_rows > 0 AND upserted + deleted > 0 THEN 'snapshot + changes'
             WHEN is_cdc AND cdc_snapshot_rows > 0 THEN 'snapshot'
             WHEN is_cdc AND upserted + deleted > 0 THEN 'incremental'
@@ -128,12 +141,13 @@ SELECT date_format(started, 'yyyy-MM-dd HH:mm:ss') AS run_started,
             WHEN qbc_snapshot THEN 'snapshot'
             ELSE 'incremental' END AS run_type,
        -- query-based snapshots and full refreshes count their rows as snapshot inserts
-       CASE WHEN is_cdc THEN cdc_snapshot_rows
+       CASE WHEN is_full_load THEN NULL
+            WHEN is_cdc THEN cdc_snapshot_rows
             WHEN is_full_refresh OR qbc_snapshot THEN upserted + appended
             ELSE 0 END AS snapshot_inserted,
-       CASE WHEN NOT is_cdc AND (is_full_refresh OR qbc_snapshot) THEN 0 ELSE upserted END AS upserted,
-       CASE WHEN NOT is_cdc AND (is_full_refresh OR qbc_snapshot) THEN 0 ELSE appended END AS appended,
-       deleted
+       CASE WHEN is_full_load THEN NULL WHEN NOT is_cdc AND (is_full_refresh OR qbc_snapshot) THEN 0 ELSE upserted END AS upserted,
+       CASE WHEN is_full_load THEN NULL WHEN NOT is_cdc AND (is_full_refresh OR qbc_snapshot) THEN 0 ELSE appended END AS appended,
+       CASE WHEN is_full_load THEN NULL ELSE deleted END AS deleted
 FROM labeled
 ORDER BY started, table_name
 ```
@@ -142,8 +156,8 @@ Show the result as one table per run (or one row per table for the latest run on
 
 | Column | Meaning |
 |---|---|
-| `pipeline_mode` | `integrated cdc`, `standard cdc`, `query-based upsert` (SCD1/SCD2), or `query-based append` (`APPEND_ONLY`) |
-| `run_type` | `snapshot`, `snapshot + changes` (integrated CDC: snapshot and change rows in one update), `incremental`, `full refresh`, `no new data`, or `none` (the run failed before any table started) |
+| `pipeline_mode` | `integrated cdc`, `standard cdc`, `query-based upsert` (SCD1/SCD2), `query-based append` (`APPEND_ONLY`), or `query-based full load` (no cursor) |
+| `run_type` | `snapshot`, `snapshot + changes` (integrated CDC: snapshot and change rows in one update), `incremental`, `full refresh`, `full load` (no cursor: counts are blank because that flow records none; count the table instead), `no new data`, or `none` (the run failed before any table started) |
 | `snapshot_inserted` | Rows loaded by the initial snapshot or a full refresh |
 | `upserted` | Change rows inserted or updated after the snapshot |
 | `appended` | New rows on an `APPEND_ONLY` table after the snapshot |
@@ -153,6 +167,8 @@ Where the numbers come from:
 
 - **Query-based:** each table has one flow, `<catalog>.<schema>.<catalog>_<schema>_<table>`. SCD tables add an `_upsert` suffix and report `num_upserted_rows` and `num_deleted_rows`. `APPEND_ONLY` tables have no suffix and report `num_output_rows`. There's no separate snapshot metric: a run counts as a snapshot when its first batch started with no saved cursor (`stream_progress` → `sources[0].startOffset.incrementalOffset`).
 - **Integrated and standard CDC:** each table has a snapshot flow and a change flow. Integrated CDC prefixes them with `applier_` (`applier_<catalog>_<schema>_<table>_snapshot_flow` / `..._cdc_flow`). The standard CDC ingestion pipeline uses the same names without the prefix. The snapshot flow reports the snapshot rows, and the change flow reports `num_upserted_rows` and `num_deleted_rows`. The query skips the `extractor_*` flows (rows read from the source) and the shared `cdc_staging_table`.
+- **Query-based, no cursor:** the table's flow is `<catalog>.<schema>.<table>` (type `SNAPSHOT_CHANGE`) and records no row counts, only timings. The report lists the table as `full load` with blank counts.
+- **Hard-delete tracking:** a separate `<catalog>_<schema>_<table>_delete` flow reports the hard deletes. The query adds them to the table's `deleted`.
 - **Skipped as well:** the per-table `_staging` flows and the internal `pipelines.flowTimeMetrics.missingFlowName` flow. They carry only timings.
 
 Things to tell the user:
@@ -160,13 +176,13 @@ Things to tell the user:
 - **Running updates report partial counts.** An integrated CDC update keeps running until smart closure ends it (see [2-database-connectors.md](2-database-connectors.md#how-an-update-runs-smart-closure)), so re-run the query after it completes.
 - **Failed runs still report** what each table loaded before the failure. A run that failed before any table started shows one `(no table ran)` row; pull its error with the `level IN ('ERROR', 'WARN')` query above.
 - **No primary key under CDC (integrated or standard):** the table is keyed on all columns, so identical source rows collapse. The snapshot count can be far below the source row count. Use SCD Type 2, or add a key at the source.
-- **Query-based SCD2 counts aren't change counts.** On query-based SCD2 tables, `num_upserted_rows` came out at about the table's row count plus the changes, on every incremental run (1,002 and 1,021 upserts for 2 and 30 real changes). Soft deletes close the current version, so they don't show up in `deleted` (0 for 10 soft deletes). SCD1 tables matched the source changes exactly (20 upserts and 10 deletes for 10 inserts, 10 updates, and 10 soft deletes). For SCD2, count the changes from the table instead, with the query below.
+- **Query-based counts can exceed the real changes.** With a timestamp cursor, SCD1 and SCD2 re-read a short lookback window before the high-water mark and merge by key, so `upserted` can include rows that didn't change (11 upserts for 5 inserts on one SCD1 table). On SCD2 tables it's much larger: about the table's row count plus the changes, on every incremental run (1,002 and 1,021 upserts for 2 and 30 real changes), and soft deletes close the current version instead of counting as `deleted`. For an exact count, use the per-key query below for SCD2 and spot-check SCD1 against the source.
 
 ---
 
 ### Changes on an SCD2 table, counted from the table
 
-Every SCD2 version carries `__START_AT` and `__END_AT`, which come from the sequencing value (the cursor column for query-based, the change-log position for CDC). Group by key to count what changed since a point in time. Use when the changes were made, or the start of the previous run. Tested against generated DML: 10 inserts, 10 updates, and 10 soft deletes came back as exactly 10 / 10 / 10.
+For **query-based** SCD2 tables, every version carries `__START_AT` and `__END_AT`, which hold the cursor value, so they're timestamps when the cursor is a timestamp. Group by key to count what changed since a point in time. Use when the changes were made, or the start of the previous run. Tested against generated DML: 10 inserts, 10 updates, and 10 soft deletes came back as exactly 10 / 10 / 10. For a numeric cursor, compare against a cursor value instead of `TIMESTAMP '<since>'`. For **CDC** SCD2 tables these columns hold the change-log sequence value (`sequence_by`), not a time, so this query doesn't apply as written. Check `DESCRIBE <table>` and compare against a sequence value.
 
 ```sql
 WITH k AS (

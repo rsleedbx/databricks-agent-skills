@@ -19,6 +19,8 @@ Don't read UC secrets or ask for the password to do this. The connection is the 
 | Postgres slot functions called from a `SELECT`: `pg_create_logical_replication_slot`, `pg_drop_replication_slot` | Yes (tested) | Works even on a connection marked read-only. `remote_query` is documented as SELECT-only, so this may change: if it fails, fall back to the user. |
 | DDL and DML: `CREATE` / `DROP PUBLICATION`, `ALTER TABLE ... REPLICA IDENTITY`, enabling SQL Server CDC, `INSERT` / `UPDATE` / `DELETE` | **No** (tested) | `remote_query` runs only queries, and refuses options such as `sessionInitStatement`. Give the user the exact SQL to run on the source. |
 
+**Slot functions need `REPLICATION` on the connection's user.** A read-only connector role (like the Lakebase demo's `<schema>_reader`) can list slots but not create them; on Lakebase the failure shows up only as "An unexpected error occurred" with a trace ID. Use a connection whose user has `REPLICATION` (or `rds_replication`), or have the user create the slot.
+
 **Each `remote_query` call is its own database session.** A temporary slot (`pg_create_logical_replication_slot(name, 'pgoutput', true)`) disappears as soon as the call returns, so it's a safe probe but useless for a pipeline. Create permanent slots for CDC.
 
 **Each Postgres CDC pipeline gets its own publication and its own slot.** Never reuse another pipeline's publication or slot, even one that already covers the same tables: a slot has one consumer at a time, and a shared publication ties table lists and cleanup together. The slot can be created through the connection. The publication can't, because `remote_query` rejects DDL and the session options that could run it (`sessionInitStatement` is refused), so give the user the exact `CREATE PUBLICATION` statement to run on the source, as the owner of the tables.
@@ -32,7 +34,8 @@ Use this when the user doesn't know their tables, or before generating DML. **Ne
 ### 1. Pick the catalog (source database)
 
 - **List what the connection can see:** the source databases (Step 0 of [3-query-based-connectors.md](3-query-based-connectors.md)), plus any foreign catalogs already on this connection (`databricks catalogs list -o json`, filtered on `connection_name`).
-- **Exactly one:** use it.
+- **A foreign catalog already exists on this connection** (any name, for example one named after the connection): use it for introspection; don't create another.
+- **Exactly one source database:** use it.
 - **More than one:** ask the user which, and show the list. Don't introspect them all; users can have access to many.
 - **None of that helps** (the user has no idea where their data is): offer to create a foreign catalog, as below.
 
@@ -49,14 +52,28 @@ databricks connections get <connection> --profile <PROFILE> -o json | jq -r .own
 
 Without `CREATE_CATALOG` on the metastore, creation fails with "User does not have CREATE CATALOG on Metastore". Say so and use the `remote_query` introspection below instead; it needs nothing extra.
 
-- **Name:** `<firstname><lastname>-<connection>`, the same convention as pipelines (see **Default pipeline names** in SKILL.md). If that catalog already exists on the same connection, reuse it. If it exists for something else, append `-2`, `-3`. The name has hyphens, so quote it with backticks in SQL.
+- **Name:** `<firstname><lastname>-<connection>`, the same convention as pipelines (see **Default pipeline names** in SKILL.md). If a catalog with that name exists for something else, append `-2`, `-3`. The name has hyphens, so quote it with backticks in SQL.
 - **Create** (MySQL has no `database` option):
 
 ```bash
 databricks catalogs create --profile <PROFILE> --json '{"name": "<firstname><lastname>-<connection>", "connection_name": "<connection>", "options": {"database": "<database>"}}'
 ```
 
-- **What it gives you:** with a foreign catalog, every column is in one query: `` SELECT * FROM `<catalog>`.information_schema.columns ``. Keys and indexes still come from the source with the queries below, because UC doesn't record source indexes.
+- **What it gives you:** a foreign catalog's `information_schema` covers columns and constraints, each in one query, without `remote_query`:
+  - **Columns:** `` SELECT * FROM `<catalog>`.information_schema.columns WHERE table_schema NOT IN ('information_schema', 'pg_catalog') ``
+  - **Primary keys and unique constraints, with columns in order** (tested on a Postgres foreign catalog: it matched the `remote_query` results below):
+
+    ```sql
+    SELECT tc.table_schema, tc.table_name, tc.constraint_type, tc.constraint_name,
+           concat_ws(',', transform(sort_array(collect_list(struct(k.ordinal_position, k.column_name))), x -> x.column_name)) AS columns
+    FROM `<catalog>`.information_schema.table_constraints tc
+    JOIN `<catalog>`.information_schema.key_column_usage k
+      ON k.constraint_schema = tc.constraint_schema AND k.constraint_name = tc.constraint_name
+    WHERE tc.constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND tc.table_schema NOT IN ('information_schema', 'pg_catalog')
+    GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 3
+    ```
+
+  - **What it doesn't cover:** plain non-unique indexes, which only the source knows. Use the keys-and-indexes query below for those. Foreign keys and check constraints are in `table_constraints` too, if you need them.
 
 ### 3. One-shot queries through the connection
 
@@ -146,7 +163,7 @@ SELECT * FROM remote_query('<connection>', database => '<database>', query => "
 ORDER BY table_schema, table_name, kind, index_name
 ```
 
-How to read `kind`: `primary key`, `unique` (a unique constraint or unique index, which can serve as the key when a table has no primary key), or `index`. A table with no `primary key` or `unique` row has no key: query-based needs `APPEND_ONLY`, and integrated CDC keys it on all columns.
+How to read `kind`: `primary key`, `unique` (a unique constraint or unique index, which can serve as the key when a table has no primary key), or `index`. A table with no `primary key` or `unique` row has no key: query-based needs `APPEND_ONLY` with a cursor, or SCD1 with no cursor, and integrated CDC keys it on all columns.
 
 ---
 
@@ -194,6 +211,12 @@ action = dbutils.widgets.get("action")
 slot_name = dbutils.widgets.get("slot_name").strip()
 conn_type = dbutils.widgets.get("conn_type").upper()
 
+import re
+# These go into SQL literals: allow only plain identifier characters
+for name, value in (("connection", conn), ("database", database)):
+    if value and not re.fullmatch(r"[A-Za-z0-9_.\-]+", value):
+        raise ValueError(f"{name} has unexpected characters: {value!r}")
+
 
 def rq(query):
     """Run one query on the source through the UC connection; returns a list of dicts."""
@@ -214,13 +237,14 @@ if action in ("create_slot", "drop_slot"):
         raise ValueError(f"{action} is PostgreSQL only, connection type is {conn_type}")
     if not slot_name.replace("_", "").isalnum() or slot_name.lower() != slot_name:
         raise ValueError("slot_name must be lowercase letters, digits, and underscores")
-    exists = any(s["slot_name"] == slot_name for s in pg_slots())
+    slots = pg_slots()   # list once; each remote_query is a separate source session
+    exists = any(s["slot_name"] == slot_name for s in slots)
     if action == "create_slot":
         out["result"] = "already exists" if exists else rq(
             f"SELECT slot_name, lsn FROM pg_create_logical_replication_slot('{slot_name}', 'pgoutput')")
     else:
         # Drop only the slot named here, and only if nothing is reading from it.
-        active = [s for s in pg_slots() if s["slot_name"] == slot_name and str(s["active"]).lower() == "true"]
+        active = [s for s in slots if s["slot_name"] == slot_name and str(s["active"]).lower() == "true"]
         if active:
             raise ValueError(f"slot {slot_name} is active; stop the gateway first")
         out["result"] = "not found" if not exists else rq(
@@ -290,16 +314,16 @@ If a task fails, `jobs submit` exits non-zero and `run.json` can be empty: find 
 
 An unused slot holds WAL on the source until someone drops it, so create it as late as possible:
 
-1. **Pick the names, one pair per pipeline:** name both after the pipeline's destination schema, for example slot `<schema>` and publication `<schema>_pub`. Run `action: list` to make sure neither name is taken. Put both in the ingestion pipeline's `source_configurations` → `postgres.slot_config` (`slot_name`, `publication_name`); see [2-database-connectors.md](2-database-connectors.md#postgresql-cdc).
-2. **Create the pipelines first:** `bundle deploy`, without starting the gateway. This is where a workspace without Postgres CDC fails ("Ingestion source 'POSTGRESQL' is not supported in your workspace", 403). If it fails, stop: nothing exists on the source yet.
+1. **Pick the names, one pair per pipeline:** slot `<slot_name>` and publication `<slot_name>_pub`, where `<slot_name>` is the pipeline's base name (`<firstname><lastname>-<connection>`, with any `-2` suffix but without `-gw` / `-ap`), lowercased, with every character other than letters, digits, and `_` turned into `_`. For example `janedoe-my_pg_conn-2` gives slot `janedoe_my_pg_conn_2` and publication `janedoe_my_pg_conn_2_pub`. Pipeline names are unique, so these are too, even when several pipelines share a destination schema. Run `action: list` to make sure neither name is taken. Put both in the ingestion pipeline's `source_configurations` → `postgres.slot_config` (`slot_name`, `publication_name`); see [2-database-connectors.md](2-database-connectors.md#postgresql-cdc).
+2. **Create the pipelines first:** `bundle deploy`. This is where a workspace without Postgres CDC fails ("Ingestion source 'POSTGRESQL' is not supported in your workspace", 403). If it fails, stop: nothing exists on the source yet. If it succeeds, the gateway is a continuous pipeline and **starts on its own**; until the publication and slot exist it errors and retries. Stop it with `databricks pipelines stop <gateway-id>` while you do steps 3 and 4.
 3. **Publication (the user runs it):** give the user this statement, listing only this pipeline's tables, and wait for them to confirm. Then check it with `action: list`:
 
    ```sql
-   CREATE PUBLICATION <schema>_pub FOR TABLE <source_schema>.<table1>, <source_schema>.<table2>;
+   CREATE PUBLICATION <slot_name>_pub FOR TABLE <source_schema>.<table1>, <source_schema>.<table2>;
    ```
 
-4. **Slot (through the connection),** after the publication exists: `action: create_slot` with `slot_name: <schema>`. Then start the gateway and run the ingestion pipeline.
-5. **Cleanup after the test** (ask first): `bundle destroy` (or delete the pipelines) so the gateway stops reading. Then run `action: drop_slot` with this pipeline's slot name, and give the user `DROP PUBLICATION <schema>_pub;` to run. Finish with `action: list` to confirm both are gone.
+4. **Slot (through the connection),** after the publication exists: `action: create_slot` with `slot_name: <slot_name>`. Then start the gateway (`databricks pipelines start-update <gateway-id>`) and run the ingestion pipeline.
+5. **Cleanup after the test** (ask first): `bundle destroy` (or delete the pipelines) so the gateway stops reading. Then run `action: drop_slot` with this pipeline's slot name, and give the user `DROP PUBLICATION <slot_name>_pub;` to run. Finish with `action: list` to confirm both are gone.
 
 If anything fails after the slot exists, drop the slot before you stop, or tell the user it's there and why it matters: a slot nobody reads keeps holding WAL and can fill the source disk, especially when `max_slot_wal_keep_size` is `-1`.
 
