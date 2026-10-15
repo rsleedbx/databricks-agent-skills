@@ -21,6 +21,9 @@ Pick the row that matches your source type and constraint.
 |---|---|---|---|
 | SaaS app with a Lakeflow Connect connector (Salesforce, Workday, ServiceNow, GA4, HubSpot, Confluence, etc.) | Yes | Lakeflow Connect | [SKILL.md](../SKILL.md), [1-saas-connectors.md](1-saas-connectors.md) |
 | Operational database (SQL Server, PostgreSQL, MySQL) with a Lakeflow Connect connector | Yes, with CDC | Lakeflow Connect | [2-database-connectors.md](2-database-connectors.md) |
+| Operational database without CDC enabled (Oracle, Teradata, SQL Server, PostgreSQL, MySQL, MariaDB) with a usable `updated_at`-style column | Yes, latest state per run | Lakeflow Connect query-based | [3-query-based-connectors.md](3-query-based-connectors.md) |
+| Lakebase Postgres (real data) | Yes | Lakehouse Sync (native, not Lakeflow Connect) | **databricks-lakebase** |
+| Lakebase Postgres standing in for a customer's PostgreSQL in a **demo** | Yes | Lakeflow Connect (Postgres query-based) | [6-lakebase-as-postgres-source.md](6-lakebase-as-postgres-source.md) |
 | Operational database, low query volume, source can absorb the load | No copy needed | Lakehouse Federation | [docs](https://docs.databricks.com/aws/en/query-federation/) |
 | Cloud object storage (S3, ADLS, GCS) with files | Yes | Auto Loader | **databricks-pipelines** |
 | SaaS file repo (SharePoint, Google Drive, SFTP) | Yes | Lakeflow Connect | [public connector reference](https://docs.databricks.com/ingestion/lakeflow-connect/) |
