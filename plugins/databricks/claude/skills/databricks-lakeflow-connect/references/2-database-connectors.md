@@ -303,16 +303,15 @@ ALTER USER databricks_replication WITH REPLICATION;
 -- Tables with a PK and no large TOASTable columns: DEFAULT. Otherwise (or no PK): FULL.
 ALTER TABLE <schema>.<table> REPLICA IDENTITY DEFAULT;
 
--- One publication per pipeline, created before the slot. List only this pipeline's tables.
--- Name it after the pipeline (e.g. <dest_schema>_pub); never share one between pipelines.
-CREATE PUBLICATION <dest_schema>_pub FOR TABLE <schema>.<table1>, <schema>.<table2>;
+-- One publication and one slot per pipeline, named after the pipeline: <slot_name> is the pipeline's
+-- base name lowercased with '-' -> '_' (e.g. janedoe_my_pg_conn_2). Never share either between pipelines.
+CREATE PUBLICATION <slot_name>_pub FOR TABLE <schema>.<table1>, <schema>.<table2>;
 
--- One slot per pipeline, created by the replication role. Only pgoutput is supported.
--- A slot has one consumer at a time, so two pipelines can never share one.
--- Create it after the pipelines deploy, so a rejected pipeline doesn't leave an unused slot holding WAL.
-SET ROLE databricks_replication;
-SELECT pg_create_logical_replication_slot('<dest_schema>', 'pgoutput');
-RESET ROLE;
+-- Slot: only pgoutput is supported, and a slot has one consumer at a time. Create it after the pipelines
+-- deploy, so a rejected pipeline doesn't leave an unused slot holding WAL. Slots have no owner: create it
+-- as any role with REPLICATION (or rds_replication). No SET ROLE needed; on PG 16+ a non-superuser admin
+-- usually can't SET ROLE to a role it created.
+SELECT pg_create_logical_replication_slot('<slot_name>', 'pgoutput');
 ```
 
 Server parameters:
@@ -345,8 +344,8 @@ resources:
               source_catalog: <db>
               postgres:
                 slot_config:
-                  slot_name: <dest_schema>           # this pipeline's own slot
-                  publication_name: <dest_schema>_pub  # this pipeline's own publication
+                  slot_name: <slot_name>             # this pipeline's own slot
+                  publication_name: <slot_name>_pub  # this pipeline's own publication
         objects:
           - table:
               source_catalog: <db>
@@ -364,7 +363,7 @@ Check the `source_configurations` shape against the [connector reference](https:
 
 ```sql
 SELECT rolname, rolreplication FROM pg_roles WHERE rolname = 'databricks_replication';
-SELECT * FROM pg_publication WHERE pubname = '<dest_schema>_pub';
+SELECT * FROM pg_publication WHERE pubname = '<slot_name>_pub';
 SELECT slot_name, plugin, active, restart_lsn FROM pg_replication_slots;
 SELECT c.relname, c.relreplident FROM pg_class c
   JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -376,9 +375,9 @@ SELECT c.relname, c.relreplident FROM pg_class c
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | Source disk filling up | Gateway stopped or deleted; the slot keeps holding WAL | Restart the gateway, or drop that pipeline's slot. Set a finite `max_slot_wal_keep_size`. |
-| Slot left behind after deleting the pipeline | Slots aren't dropped automatically | `SELECT pg_drop_replication_slot('<dest_schema>');`, or `action: drop_slot` in [7-source-sql-through-connection.md](7-source-sql-through-connection.md). Drop only your own slot, by name. |
+| Slot left behind after deleting the pipeline | Slots aren't dropped automatically | `SELECT pg_drop_replication_slot('<slot_name>');`, or `action: drop_slot` in [7-source-sql-through-connection.md](7-source-sql-through-connection.md). Drop only your own slot, by name. |
 | Updates / deletes missing columns | `REPLICA IDENTITY DEFAULT` on a table without a PK or with TOASTed columns | `ALTER TABLE ... REPLICA IDENTITY FULL`. |
-| Table not replicating | Not in the publication | `ALTER PUBLICATION <dest_schema>_pub ADD TABLE <schema>.<table>;` |
+| Table not replicating | Not in the publication | `ALTER PUBLICATION <slot_name>_pub ADD TABLE <schema>.<table>;` |
 | Gateway create fails: "Ingestion source 'POSTGRESQL' is not supported in your workspace" (403) | Postgres CDC isn't enabled on this workspace (query-based Postgres can still work) | Ask the Databricks account team or support to enable it. Don't work around it. If you already created a slot, drop it. The deploy may have created the destination and staging schemas before failing: offer `bundle destroy` to remove them. |
 | Slot creation fails | Wrong role, or `wal_level` not `logical` | Create the slot as the `REPLICATION` role, after the publication, with `pgoutput`. |
 
