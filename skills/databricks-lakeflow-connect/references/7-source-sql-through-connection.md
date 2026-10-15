@@ -204,7 +204,7 @@ def rq(query):
 
 
 def pg_slots():
-    return rq("SELECT slot_name, plugin, database, active, temporary, inactive_since FROM pg_replication_slots")
+    return rq("SELECT slot_name, plugin, database, active, temporary FROM pg_replication_slots")  # no inactive_since: PG 17+ only
 
 
 out = {"connection": conn, "type": conn_type, "database": database or None, "action": action}

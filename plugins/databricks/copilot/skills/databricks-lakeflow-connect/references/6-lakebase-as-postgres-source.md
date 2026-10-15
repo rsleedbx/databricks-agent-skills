@@ -179,11 +179,10 @@ Grant `SELECT` only — the connector never writes to the source. For more reali
 Create the connection from the `conn.json` that Step 2 wrote, then delete the file. `conn.json` lands in the directory you ran psql from: delete it there with a plain `rm conn.json` (or `rm <dir>/conn.json`), and if you can't, tell the user its exact path.
 
 ```bash
-databricks connections create --json @conn.json --profile <PROFILE>
-rm conn.json
+databricks connections create --json @conn.json --profile <PROFILE> && rm conn.json
 ```
 
-If the connection already exists (for example after re-running `role.sql`), delete it with `databricks connections delete lfc_demo_pg_conn` and create it again.
+Delete `conn.json` only once the create succeeds. If the connection already exists (for example after re-running `role.sql`), run `databricks connections delete lfc_demo_pg_conn`, then the same `create` from the same `conn.json`, then delete the file. Don't re-run `role.sql` just to get a new body: that rotates the password.
 
 Lakebase requires TLS. Test the connection with a quick Federation query or `databricks connections get lfc_demo_pg_conn` before building the pipeline.
 
@@ -256,7 +255,7 @@ resources:
 
   jobs:
     lakebase_qbc_schedule:
-      name: lakebase_qbc_schedule
+      name: <firstname><lastname>-lfc_demo_pg_conn-schedule   # the pipeline name + -schedule
       trigger:
         periodic:
           interval: 15
@@ -291,7 +290,7 @@ UPDATE lfc_demo.orders    SET is_deleted = true WHERE order_id = 200;       -- s
 ```
 
 ```bash
-databricks bundle run lakebase_qbc          # run 2: incremental pull
+databricks bundle run lakebase_qbc -t dev --var catalog=<catalog> --profile <PROFILE>   # run 2: incremental pull
 ```
 
 Show the result:
@@ -324,6 +323,7 @@ rm -f conn.json
 
 ```sql
 DROP SCHEMA lfc_demo CASCADE;
+REVOKE CONNECT ON DATABASE databricks_postgres FROM lfc_demo_reader;   -- or DROP ROLE fails ("privileges for database")
 DROP ROLE lfc_demo_reader;
 ```
 
@@ -341,13 +341,13 @@ You're connected as the project owner through `databricks psql`, so you can run 
 -- cdc_probe.sql: run with databricks psql --project <project-id> --profile <PROFILE> -- -X -v ON_ERROR_STOP=1 -f cdc_probe.sql
 SHOW wal_level;                                                       -- needs 'logical'
 SELECT rolreplication FROM pg_roles WHERE rolname = current_user;     -- needs t
-CREATE PUBLICATION lfc_demo_pub FOR TABLE lfc_demo.customers, lfc_demo.orders;
+CREATE PUBLICATION <dest_schema>_pub FOR TABLE lfc_demo.customers, lfc_demo.orders;   -- e.g. lakebase_raw_pub
 ```
 
 How to read the result:
 
 - **The `CREATE PUBLICATION` fails** with "[Databricks Auth] CREATE PUBLICATION is not enabled on this Lakebase instance": CDC isn't available on this Lakebase yet, even though `wal_level` is `logical` and the role has `REPLICATION` (both are true on current Lakebase). Use query-based. Nothing was created.
-- **It succeeds:** keep the publication and continue with the Postgres CDC section in [2-database-connectors.md](2-database-connectors.md). Name everything after this demo's schema: publication `<schema>_pub`, slot `<schema>`, and pipelines `<base>-gw` / `<base>-ap` (see **Default pipeline names** in SKILL.md). Create the slot after the pipelines deploy, as the owner: `SELECT pg_create_logical_replication_slot('lfc_demo', 'pgoutput');`. If the slot or the pipelines fail, drop what you created (`DROP PUBLICATION lfc_demo_pub;`, `pg_drop_replication_slot('lfc_demo')`) and fall back to query-based.
+- **It succeeds:** keep the publication and continue with the Postgres CDC section in [2-database-connectors.md](2-database-connectors.md). Name them the same way as the Postgres CDC section, after the pipeline's destination schema: publication `<dest_schema>_pub`, slot `<dest_schema>`, and pipelines `<base>-gw` / `<base>-ap` (see **Default pipeline names** in SKILL.md). Put the same two names in the ingestion pipeline's `slot_config`. Create the slot after the pipelines deploy, as the owner: `SELECT pg_create_logical_replication_slot('<dest_schema>', 'pgoutput');`. If the slot or the pipelines fail, drop what you created (`DROP PUBLICATION <dest_schema>_pub;`, `SELECT pg_drop_replication_slot('<dest_schema>');`) and fall back to query-based.
 
 Lakebase-specific checks once CDC works:
 
