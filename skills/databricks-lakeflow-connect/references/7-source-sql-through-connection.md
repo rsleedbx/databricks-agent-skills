@@ -53,7 +53,7 @@ databricks connections get <connection> --profile <PROFILE> -o json | jq -r .own
 Without `CREATE_CATALOG` on the metastore, creation fails with "User does not have CREATE CATALOG on Metastore". Say so and use the `remote_query` introspection below instead; it needs nothing extra.
 
 - **Name:** `<firstname><lastname>-<connection>`, the same convention as pipelines (see **Default pipeline names** in SKILL.md). If a catalog with that name exists for something else, append `-2`, `-3`. The name has hyphens, so quote it with backticks in SQL.
-- **Create** (MySQL has no `database` option):
+- **Create.** Options per source (each tested with a query-based pipeline reading through the catalog): PostgreSQL and SQL Server `{"database": "<database>"}`; MySQL none (leave `options` out); Oracle `{"service_name": "<PDB>"}`, for example `FREEPDB1`. Use `--json` only: `catalogs create` has no `--options` flag, and it rejects a positional name together with `--json`. When the connection's name already starts with `<firstname><lastname>-`, the catalog is `<connection>` plus a suffix, not the prefix twice.
 
 ```bash
 databricks catalogs create --profile <PROFILE> --json '{"name": "<firstname><lastname>-<connection>", "connection_name": "<connection>", "options": {"database": "<database>"}}'
