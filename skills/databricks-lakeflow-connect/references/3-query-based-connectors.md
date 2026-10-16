@@ -199,7 +199,7 @@ SELECT * FROM remote_query('<connection>', database => '<database>', query => "
    WHERE t.is_ms_shipped = 0") ORDER BY table_schema, table_name
 ```
 
-**Oracle:** pass the service (in a multi-tenant database, the PDB, for example `FREEPDB1`) as `service_name =>`. Names come back in uppercase, and the pipeline needs them that way.
+**Oracle:** the query runs in the connection's own service. In a multi-tenant database, use a connection whose `service_name` is the PDB (for example `FREEPDB1`) for these queries: once a connection has a `service_name`, the `service_name =>` argument below is ignored (tested: with the connection on the CDB service `FREE`, the query landed in `CDB$ROOT` and saw none of the PDB's tables). The argument only matters on a connection without one. Names come back in uppercase, and the pipeline needs them that way.
 
 ```sql
 SELECT * FROM remote_query('<connection>', service_name => '<service>', query => "
@@ -244,7 +244,7 @@ Per source (each tested end to end with a query-based pipeline):
 | PostgreSQL | `POSTGRESQL` | |
 | MySQL | `MYSQL` | |
 | SQL Server | `SQLSERVER` | A server with a self-signed certificate (a VM or container install) needs `"trustServerCertificate": "true"` in `options`, or every query fails with `FAILED_JDBC.CONNECTION`. Managed services don't. |
-| Oracle | `ORACLE` | `user` in uppercase (`C##LFC_USER` for a common user). `"service_name"`: the root container's service in a multi-tenant database, which is the CDB's name (`FREE` on Oracle Free, not the literal `CDB$ROOT`, which the listener doesn't serve). Integrated CDC refuses a connection without it (`Missing service_name option in the connection`); query-based works either way. The PDB is given per query (`service_name => 'FREEPDB1'` overrides the connection's) and per pipeline (`source_catalog`). Find the services with `lsnrctl status`. |
+| Oracle | `ORACLE` | `user` in uppercase (`C##LFC_USER` for a common user). `"service_name"`: the root container's service in a multi-tenant database, which is the CDB's name (`FREE` on Oracle Free, not the literal `CDB$ROOT`, which the listener doesn't serve); integrated CDC refuses a connection without it (`Missing service_name option in the connection`). Pipelines on it reach the PDB through `source_catalog` (tested: query-based and integrated CDC). SQL through the connection (`remote_query`, Step 0) runs in the connection's service and ignores a `service_name =>` argument, so for the PDB's tables add a second connection with `\"service_name\": \"<PDB>\"`. Find the services with `lsnrctl status`. |
 
 Use a dedicated, read-only database user. Requires `CREATE CONNECTION` on the metastore. Grant `USE CONNECTION` to whoever creates the pipeline if that is a different principal. Check the connection with a Step 0 query before building the pipeline: `FAILED_JDBC.CONNECTION ... Failed to connect to the database` is the network path or, on SQL Server, the certificate.
 
