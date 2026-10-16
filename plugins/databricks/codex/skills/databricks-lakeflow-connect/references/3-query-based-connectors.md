@@ -85,6 +85,8 @@ Tested on Postgres (Lakebase) through a UC connection, two runs with inserts, up
 | Cursor with NULLs | ⚠️ snapshot loads them; later NULL-cursor rows are skipped | ⚠️ same | ⚠️ same |
 | Hard deletes, `hard_deletion_sync_min_interval_in_seconds` set | ✅ deleted rows removed | not supported (per docs) | n/a |
 
+The two most common shapes were also run on PostgreSQL 16, MySQL 8.4, SQL Server 2022 and Oracle 23ai Free (the same tables on each, through a UC connection to a cloud VM): a primary key + timestamp cursor bumped by a trigger under `SCD_TYPE_1`, and a keyless table + cursor under `APPEND_ONLY`. After 5 inserts and 3 updates, every engine landed 15 rows with the 3 updates applied. The keyless table got 5 new rows plus 1 appended row for its update. The results were identical across engines.
+
 The docs say a table with no key gets a synthetic key from all columns. Through a UC connection it didn't: SCD without `primary_keys` failed. Declare a key, or use `APPEND_ONLY`.
 
 ---
@@ -197,6 +199,23 @@ SELECT * FROM remote_query('<connection>', database => '<database>', query => "
    WHERE t.is_ms_shipped = 0") ORDER BY table_schema, table_name
 ```
 
+**Oracle:** pass the service (in a multi-tenant database, the PDB, for example `FREEPDB1`) as `service_name =>`. Names come back in uppercase, and the pipeline needs them that way.
+
+```sql
+SELECT * FROM remote_query('<connection>', service_name => '<service>', query => "
+  SELECT t.owner AS table_schema, t.table_name,
+         (SELECT LISTAGG(cc.column_name, ',') WITHIN GROUP (ORDER BY cc.position)
+            FROM all_constraints c JOIN all_cons_columns cc ON cc.owner = c.owner AND cc.constraint_name = c.constraint_name
+           WHERE c.owner = t.owner AND c.table_name = t.table_name AND c.constraint_type = 'P') AS primary_key,
+         (SELECT LISTAGG(col.column_name || ' ' || col.data_type || CASE WHEN col.nullable = 'N' THEN ' not null' END, ', ')
+                 WITHIN GROUP (ORDER BY col.column_id)
+            FROM all_tab_columns col
+           WHERE col.owner = t.owner AND col.table_name = t.table_name
+             AND (col.data_type = 'DATE' OR col.data_type LIKE 'TIMESTAMP%')) AS cursor_candidates
+    FROM all_tables t
+   WHERE t.owner NOT IN (SELECT username FROM all_users WHERE oracle_maintained = 'Y')") ORDER BY 1, 2
+```
+
 How these queries are written:
 
 - **Outer string in double quotes,** so the source SQL can use single-quoted literals without escaping.
@@ -207,24 +226,27 @@ How these queries are written:
 
 ## Step 1 — UC connection
 
-A query-based pipeline points at a regular Unity Catalog connection (the same object Lakehouse Federation uses). Postgres example:
+A query-based pipeline points at a regular Unity Catalog connection (the same object Lakehouse Federation uses). Write the request body to a private file so the password never appears on a command line, then delete it:
 
 ```bash
-databricks connections create --json '{
-  "name": "pg_source_conn",
-  "connection_type": "POSTGRESQL",
-  "options": {
-    "host": "<pg-host>",
-    "port": "5432",
-    "user": "<pg-user>",
-    "password": "<pg-password>"
-  }
-}'
+umask 077
+cat > conn.json <<EOF
+{"name": "<connection>", "connection_type": "POSTGRESQL",
+ "options": {"host": "<host>", "port": "5432", "user": "<user>", "password": "$(cat <user>.pw)"}}
+EOF
+databricks connections create --json @conn.json --profile <PROFILE> && rm conn.json
 ```
 
-Use a dedicated, read-only database user. Don't paste real passwords into shell history or commit them; feed them from a secret store or an env var.
+Per source (each tested end to end with a query-based pipeline):
 
-Requires `CREATE CONNECTION` on the metastore. Grant `USE CONNECTION` to whoever creates the pipeline if that is a different principal.
+| Source | `connection_type` | Notes |
+|---|---|---|
+| PostgreSQL | `POSTGRESQL` | |
+| MySQL | `MYSQL` | |
+| SQL Server | `SQLSERVER` | A server with a self-signed certificate (a VM or container install) needs `"trustServerCertificate": "true"` in `options`, or every query fails with `FAILED_JDBC.CONNECTION`. Managed services don't. |
+| Oracle | `ORACLE` | `user` in uppercase (`C##LFC_USER` for a common user). No service in the connection: pass it per query (`service_name =>`) and per pipeline (`source_catalog`). |
+
+Use a dedicated, read-only database user. Requires `CREATE CONNECTION` on the metastore. Grant `USE CONNECTION` to whoever creates the pipeline if that is a different principal. Check the connection with a Step 0 query before building the pipeline: `FAILED_JDBC.CONNECTION ... Failed to connect to the database` is the network path or, on SQL Server, the certificate.
 
 Source-side grants (Postgres):
 
@@ -280,6 +302,7 @@ resources:
 | PostgreSQL | database | schema (e.g. `public`) |
 | SQL Server | database | schema (e.g. `dbo`) |
 | MySQL | omit | database (MySQL has no separate schema level) |
+| Oracle | service name: the PDB in a multi-tenant database (e.g. `FREEPDB1`) | owner, uppercase (e.g. `LFC`); `source_table`, `primary_keys`, and `cursor_columns` uppercase too |
 
 Keep scratch files (the Step 0 discovery `.sql` files, report queries) out of the bundle directory, for example in a `queries/` folder listed under `sync.exclude`. Otherwise `bundle deploy` uploads them to the workspace.
 
