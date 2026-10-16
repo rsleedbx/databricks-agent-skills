@@ -56,6 +56,8 @@ SELECT * FROM remote_query('<connection>', database => '<database>', query => "
 SELECT * FROM remote_query('<connection>', query => "SELECT @@log_bin AS log_bin, @@binlog_format AS binlog_format, @@binlog_row_image AS binlog_row_image")
 ```
 
+**TLS on the connection.** The CDC extractor enforces TLS even where query-based ingestion through the same connection doesn't. A source with a self-signed certificate (a VM or container install of MySQL or SQL Server) fails at the start of the update: `Extractor FAILED`, with `INGESTION_GATEWAY_CONNECTION_ERROR.TLS_VALIDATION_FAILURE ... TLS is enforced but no server certificate provided. Provide a server certificate or set trustServerCertificate=true`. Add `"trustServerCertificate": "true"` to the connection's options with `databricks connections update <connection> --json @opts.json` (pass every option, including the password, from a private file), then start a new update. Managed services with trusted certificates don't need it.
+
 A table with neither CDC nor change tracking can't be ingested with CDC: enable it at the source (ask first; it's a change to the customer's database), or use query-based for that table.
 
 ### Pipeline
@@ -89,7 +91,9 @@ resources:
           schema_name: sqlserver_cdc_staging
 ```
 
-For MySQL, address tables by `source_schema: <mysql-database>` with no `source_catalog`, and add `channel: PREVIEW` while the docs page requires it:
+Tested on a serverless-only workspace (Azure, 2026-10), both against containers on a cloud VM: SQL Server 2022 (change tracking on a table with a primary key, SQL Server CDC on one without), and MySQL 8.4. Each took the snapshot, then applied 3 inserts, 2 updates, and 2 deletes per table within about 3 minutes while the update was still running. Tables without a primary key ended up with the same rows as the source.
+
+For MySQL, address tables by `source_schema: <mysql-database>` with no `source_catalog`, and add `channel: PREVIEW` while the docs page requires it. The MySQL page said classic compute only, but the serverless-only workspace rejected `serverless: false` ("You must use serverless compute in this workspace"), and `serverless: true` then created a pipeline that ran correctly:
 
 ```yaml
     mysql_cdc:
@@ -264,7 +268,7 @@ The gateway compute itself runs on Databricks-managed VPC infrastructure inside 
 
 ## Workspace feature gates (all database sources)
 
-Each standard CDC source is enabled per workspace. When it isn't, the gateway create fails with `Ingestion source '<SOURCE>' is not supported in your workspace. Please contact Databricks support to enable this feature for your workspace. (403 PERMISSION_DENIED)`. This has been seen for `POSTGRESQL` and `MYSQL` on a workspace where query-based and integrated CDC for the same sources worked. Report it, don't work around it, and offer what does work there (integrated CDC or query-based). A failed `bundle deploy` can still have created the schemas declared before the pipelines: offer `bundle destroy` so nothing is left behind.
+Each standard CDC source is enabled per workspace. When it isn't, the gateway create fails with `Ingestion source '<SOURCE>' is not supported in your workspace. Please contact Databricks support to enable this feature for your workspace. (403 PERMISSION_DENIED)`. This has been seen for `POSTGRESQL` and `MYSQL` on a workspace where query-based and integrated CDC for the same sources worked, and for `ORACLE` (integrated CDC) and `POSTGRESQL` (gateway) on a workspace where query-based ingestion from both worked. Report it, don't work around it, and offer what does work there (integrated CDC or query-based). A failed `bundle deploy` can still have created the schemas declared before the pipelines: offer `bundle destroy` so nothing is left behind.
 
 The workspace's compute policy also wins. A workspace that requires serverless rejects a classic gateway with "You must use serverless compute in this workspace": set `serverless: true` on the gateway and redeploy.
 
