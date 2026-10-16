@@ -24,7 +24,7 @@ There are two ways to run a database CDC connector:
 |---|---|---|
 | SQL Server | [sql-server-integrated-pipeline](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/sql-server-integrated-pipeline) | GA |
 | MySQL | [mysql-integrated-pipeline](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/mysql-integrated-pipeline) | Beta |
-| Oracle | [oracle-integrated-overview](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/oracle-integrated-overview) | Beta |
+| Oracle | [oracle-integrated-overview](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/oracle-integrated-overview) | Beta; `channel: PREVIEW`; serverless works; integrated only |
 | PostgreSQL | none yet: standard CDC only | — |
 | All | [smart-closure](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/smart-closure): how long an update runs | — |
 
@@ -91,7 +91,7 @@ resources:
           schema_name: sqlserver_cdc_staging
 ```
 
-Tested on a serverless-only workspace (Azure, 2026-10), both against containers on a cloud VM: SQL Server 2022 (change tracking on a table with a primary key, SQL Server CDC on one without), and MySQL 8.4. Each took the snapshot, then applied 3 inserts, 2 updates, and 2 deletes per table within about 3 minutes while the update was still running. Tables without a primary key ended up with the same rows as the source.
+Tested on a serverless-only workspace (Azure, 2026-10), against containers on a cloud VM: SQL Server 2022 (change tracking on a table with a primary key, SQL Server CDC on one without), MySQL 8.4, and Oracle 23ai Free (integrated, `channel: PREVIEW`, `serverless: true`, `source_catalog` = the PDB, `FREEPDB1`, with the connection's `service_name` = the CDB's service; see [3-query-based-connectors.md](3-query-based-connectors.md) Step 1). Each took the snapshot, then applied 3 inserts, 2 updates, and 2 deletes per table within about 3 minutes while the update was still running. Tables without a primary key ended up with the same rows as the source.
 
 For MySQL, address tables by `source_schema: <mysql-database>` with no `source_catalog`, and add `channel: PREVIEW` while the docs page requires it. The MySQL page said classic compute only, but the serverless-only workspace rejected `serverless: false` ("You must use serverless compute in this workspace"), and `serverless: true` then created a pipeline that ran correctly:
 
@@ -193,6 +193,12 @@ Trade-offs:
 - Two pipelines, two pieces of state. Both must be healthy.
 - Gateway is **classic compute** — billed separately from the serverless ingestion DBUs. See the [pricing page](https://www.databricks.com/product/pricing/lakeflow-connect) for current rates.
 - Staging Volume retention is 30 days. Reprocessing further back requires a snapshot reload.
+
+---
+
+### Standard CDC on a serverless-only workspace (tested)
+
+A classic gateway is rejected with "You must use serverless compute in this workspace". With `"serverless": true` on the gateway, SQL Server standard CDC worked: the gateway runs continuously (it starts as soon as it's created), the applier took the snapshot on its first run, and a second run applied 3 inserts, 2 updates, and 2 deletes per table. The applier is triggered: run it again after source changes, or schedule it. Stop the gateway when the test is done (`databricks pipelines stop <gateway-id>`); it keeps billing otherwise. On the same workspace, MySQL and PostgreSQL gateways were refused as not enabled ([feature gates](#workspace-feature-gates-all-database-sources)), while integrated MySQL CDC worked. Oracle has no standard (gateway) mode in the docs, only integrated.
 
 ---
 
