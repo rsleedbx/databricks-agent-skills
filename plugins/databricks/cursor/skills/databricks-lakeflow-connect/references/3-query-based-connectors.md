@@ -244,7 +244,7 @@ Per source (each tested end to end with a query-based pipeline):
 | PostgreSQL | `POSTGRESQL` | |
 | MySQL | `MYSQL` | |
 | SQL Server | `SQLSERVER` | A server with a self-signed certificate (a VM or container install) needs `"trustServerCertificate": "true"` in `options`, or every query fails with `FAILED_JDBC.CONNECTION`. Managed services don't. |
-| Oracle | `ORACLE` | `user` in uppercase (`C##LFC_USER` for a common user). No service in the connection: pass it per query (`service_name =>`) and per pipeline (`source_catalog`). |
+| Oracle | `ORACLE` | `user` in uppercase (`C##LFC_USER` for a common user). `"service_name"`: the root container's service in a multi-tenant database, which is the CDB's name (`FREE` on Oracle Free, not the literal `CDB$ROOT`, which the listener doesn't serve). Integrated CDC refuses a connection without it (`Missing service_name option in the connection`); query-based works either way. The PDB is given per query (`service_name => 'FREEPDB1'` overrides the connection's) and per pipeline (`source_catalog`). Find the services with `lsnrctl status`. |
 
 Use a dedicated, read-only database user. Requires `CREATE CONNECTION` on the metastore. Grant `USE CONNECTION` to whoever creates the pipeline if that is a different principal. Check the connection with a Step 0 query before building the pipeline: `FAILED_JDBC.CONNECTION ... Failed to connect to the database` is the network path or, on SQL Server, the certificate.
 
