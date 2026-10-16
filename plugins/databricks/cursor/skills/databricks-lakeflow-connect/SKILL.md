@@ -116,6 +116,7 @@ No extra connector-specific SDK is needed. Lakeflow Connect reuses the pipelines
 - **First and last name:** `name.givenName` + `name.familyName` from `databricks current-user me`, lowercased, letters and digits only (Jane Doe → `janedoe`). If those are empty, use the part of `userName` before `@`, without dots.
 - **Standard (two-pipeline) CDC:** the gateway is `<base>-gw` and the ingestion pipeline (the applier) is `<base>-ap`.
 - **Query-based and integrated CDC:** a single pipeline, `<base>`.
+- **A connection you create** without a name from the user: `<firstname><lastname>-<engine>-<target>` (`janedoe-mysql-awsvm`), the same first and last name as above.
 - **A connection that already starts with `<firstname><lastname>-`** (as the source skills name them) is the base as is, without repeating the prefix: `janedoe-mysql-azvm`, not `janedoe-janedoe-mysql-azvm`.
 - **If a name is taken,** append the next free number: `<base>-2`, `<base>-3`, ... For standard CDC, use the same number for both: `<base>-gw-2` / `<base>-ap-2`. Check with `databricks pipelines list-pipelines --filter "name LIKE '<base>%'"` and look at the exact names it returns.
 - **In bundles, don't use `mode: development`:** it prefixes every name with `[dev <user>]`.
