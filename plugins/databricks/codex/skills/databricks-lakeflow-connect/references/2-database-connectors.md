@@ -56,7 +56,7 @@ SELECT * FROM remote_query('<connection>', database => '<database>', query => "
 SELECT * FROM remote_query('<connection>', query => "SELECT @@log_bin AS log_bin, @@binlog_format AS binlog_format, @@binlog_row_image AS binlog_row_image")
 ```
 
-**TLS on the connection.** The CDC extractor enforces TLS even where query-based ingestion through the same connection doesn't. A source with a self-signed certificate (a VM or container install of MySQL or SQL Server) fails at the start of the update: `Extractor FAILED`, with `INGESTION_GATEWAY_CONNECTION_ERROR.TLS_VALIDATION_FAILURE ... TLS is enforced but no server certificate provided. Provide a server certificate or set trustServerCertificate=true`. Add `"trustServerCertificate": "true"` to the connection's options with `databricks connections update <connection> --json @opts.json` (pass every option, including the password, from a private file), then start a new update. Managed services with trusted certificates don't need it.
+**TLS on the connection.** The CDC extractor enforces TLS. On MySQL, query-based ingestion through the same connection works without a trusted certificate and only CDC fails; on SQL Server, every query fails too (`FAILED_JDBC.CONNECTION`, see the connection table in [3-query-based-connectors.md](3-query-based-connectors.md)). A source with a self-signed certificate (a VM or container install of MySQL or SQL Server) fails at the start of the update: `Extractor FAILED`, with `INGESTION_GATEWAY_CONNECTION_ERROR.TLS_VALIDATION_FAILURE ... TLS is enforced but no server certificate provided. Provide a server certificate or set trustServerCertificate=true`. Add `"trustServerCertificate": "true"` to the connection's options with `databricks connections update <connection> --json @opts.json` (pass every option, including the password, from a private file), then start a new update. Managed services with trusted certificates don't need it.
 
 A table with neither CDC nor change tracking can't be ingested with CDC: enable it at the source (ask first; it's a change to the customer's database), or use query-based for that table.
 
@@ -73,7 +73,7 @@ resources:
       name: <base>                     # <firstname><lastname>-<connection>, see SKILL.md
       catalog: ${var.catalog}
       schema: sqlserver_cdc_raw
-      serverless: true                 # per the current docs and the workspace's compute policy
+      serverless: true                 # the serverless-only workspace required it (the MySQL page said classic only)
       ingestion_definition:
         connection_name: my_sqlserver_connection
         connector_type: CDC
@@ -101,7 +101,7 @@ For MySQL, address tables by `source_schema: <mysql-database>` with no `source_c
       channel: PREVIEW                 # while the MySQL page says it's required
       catalog: ${var.catalog}
       schema: mysql_cdc_raw
-      serverless: true                 # per the current docs and the workspace's compute policy
+      serverless: true                 # the serverless-only workspace required it (the MySQL page said classic only)
       ingestion_definition:
         connection_name: my_mysql_connection
         connector_type: CDC
@@ -274,7 +274,7 @@ The gateway compute itself runs on Databricks-managed VPC infrastructure inside 
 
 ## Workspace feature gates (all database sources)
 
-Each standard CDC source is enabled per workspace. When it isn't, the gateway create fails with `Ingestion source '<SOURCE>' is not supported in your workspace. Please contact Databricks support to enable this feature for your workspace. (403 PERMISSION_DENIED)`. This has been seen for `POSTGRESQL` and `MYSQL` on a workspace where query-based and integrated CDC for the same sources worked, and for `ORACLE` (integrated CDC) and `POSTGRESQL` (gateway) on a workspace where query-based ingestion from both worked. Report it, don't work around it, and offer what does work there (integrated CDC or query-based). A failed `bundle deploy` can still have created the schemas declared before the pipelines: offer `bundle destroy` so nothing is left behind.
+Each standard CDC source is enabled per workspace. When it isn't, the gateway create fails with `Ingestion source '<SOURCE>' is not supported in your workspace. Please contact Databricks support to enable this feature for your workspace. (403 PERMISSION_DENIED)`. This has been seen for `POSTGRESQL` and `MYSQL` on a workspace where query-based and integrated CDC for the same sources worked, and for `ORACLE` (integrated CDC) and `POSTGRESQL` (gateway) on a workspace where query-based ingestion from both worked. Report it, don't work around it, and offer the modes that weren't refused: for a refused gateway (standard CDC), integrated CDC or query-based; for a refused integrated CDC source, standard CDC where the source has it, else query-based (Oracle has no standard mode, so query-based). A failed `bundle deploy` can still have created the schemas declared before the pipelines: offer `bundle destroy` so nothing is left behind.
 
 The workspace's compute policy also wins. A workspace that requires serverless rejects a classic gateway with "You must use serverless compute in this workspace": set `serverless: true` on the gateway and redeploy.
 
