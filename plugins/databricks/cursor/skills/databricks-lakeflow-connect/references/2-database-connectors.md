@@ -191,7 +191,7 @@ Why each piece:
 Trade-offs:
 
 - Two pipelines, two pieces of state. Both must be healthy.
-- Gateway is **classic compute** — billed separately from the serverless ingestion DBUs. See the [pricing page](https://www.databricks.com/product/pricing/lakeflow-connect) for current rates.
+- Gateway compute is billed separately from the ingestion DBUs. It used to be classic only; leave `serverless` unset and read back what it ran on ([below](#workspace-feature-gates-all-database-sources)). See the [pricing page](https://www.databricks.com/product/pricing/lakeflow-connect) for current rates.
 - Staging Volume retention is 30 days. Reprocessing further back requires a snapshot reload.
 
 ---
@@ -277,6 +277,29 @@ The gateway compute itself runs on Databricks-managed VPC infrastructure inside 
 Each standard CDC source is enabled per workspace. When it isn't, the gateway create fails with `Ingestion source '<SOURCE>' is not supported in your workspace. Please contact Databricks support to enable this feature for your workspace. (403 PERMISSION_DENIED)`. This has been seen for `POSTGRESQL` and `MYSQL` on a workspace where query-based and integrated CDC for the same sources worked, and for `ORACLE` (integrated CDC) and `POSTGRESQL` (gateway) on a workspace where query-based ingestion from both worked. Report it, don't work around it, and offer the modes that weren't refused: for a refused gateway (standard CDC), integrated CDC or query-based; for a refused integrated CDC source, standard CDC where the source has it, else query-based (Oracle has no standard mode, so query-based). A failed `bundle deploy` can still have created the schemas declared before the pipelines: offer `bundle destroy` so nothing is left behind.
 
 The workspace's compute policy also wins. A workspace that requires serverless rejects a classic gateway with "You must use serverless compute in this workspace": set `serverless: true` on the gateway and redeploy.
+
+**Leave `serverless` unset on every pipeline and gateway, read back what the system chose, and change it if that fails.** The UI uses the default too; when the default fails, you change the setting yourself. Defaults change over time and differ by workspace, mode, and source, so don't set `serverless` in the bundle or the REST body unless the workspace or the docs page requires it. After the first update starts, read the choice:
+
+```bash
+databricks pipelines get-update <pipeline-id> <update-id> --profile <PROFILE> -o json \
+  | yq -p json -o tsv '"serverless=" + (.update.config.serverless | tostring) + " cluster=" + (.update.cluster_id // "")'
+```
+
+`pipelines get` doesn't tell: its `spec.serverless` stays unset, echoing what you sent. **If the create or the update fails on compute or on reaching the source, set the opposite explicitly and retry.** Tested 2026-10 on two AWS workspaces and an Azure workspace with classic compute:
+
+| Workspace | `serverless` unset | Opposite |
+|---|---|---|
+| Classic compute available (AWS, Azure) | Query-based: `config.serverless=true`. Gateway: `false` (classic, its own cluster). Integrated CDC, MySQL and SQL Server (Azure): `false`, classic, its own cluster | Integrated CDC and gateway with `serverless: true`: ran serverless |
+| Serverless-only (AWS) | Query-based: `true`. Gateway: refused at create with `You must use serverless compute in this workspace.` | Gateway with `serverless: true`: created and started (`config.serverless=true`) |
+
+**Two different failures, at different times.** Tell them apart before changing anything:
+
+- **The compute isn't allowed.** Seen at create, in seconds: `You must use serverless compute in this workspace.` (a gateway left unset on a serverless-only workspace). A classic cluster you aren't allowed to create (no `allow-cluster-create`, no usable cluster policy) should fail here too, before anything connects (not tested yet). Set the opposite and retry.
+- **The compute starts but can't reach the source.** Seen as `Extractor STARTED`, then about a minute later `Extractor FAILED` with `INGESTION_GATEWAY_CONNECTION_ERROR.INCORRECT_SOURCE_HOSTNAME_OR_PORT_SPECIFIED_FAILURE ... Could not connect to the source database`, with the IP's last octet masked as `0`. On the Azure workspace, integrated CDC for MySQL and SQL Server ran on classic and failed this way. The host and port were right: the source's firewall allowed the serverless ranges but not the workspace's classic egress IP, and `remote_query` on the same connection, which runs on serverless, still worked. Read `update.config.serverless`: if it's `false`, set `serverless: true` and retry before checking the host.
+
+**Classic takes longer to start than serverless, so expect the second failure later on classic.** In the event log (`WAITING_FOR_RESOURCES` until `INITIALIZING`), classic integrated CDC waited 7 min 40 s to 8 min 10 s for its cluster. Serverless pipelines and gateways on the same workspace waited 10 s to 1 min 20 s, and 3 min 50 s once, for the first serverless start there. `update.config.serverless` is set as soon as the update starts, so read it right away to know which wait to expect.
+
+To know beforehand whether a workspace has classic compute, run `databricks clusters list-zones --profile <PROFILE>`. A list of zones means classic is there; on Azure, `Azure worker environment does not support zones` also means classic is there. `No such workerEnvironment 'serverless-<workspace id>'` (AWS) or `does not have any associated worker environment` (Azure) means a serverless-only workspace. Any other answer (seen on GCP) doesn't tell, so let the create decide. Classic also needs the `allow-cluster-create` entitlement or a cluster policy you can use.
 
 ---
 
