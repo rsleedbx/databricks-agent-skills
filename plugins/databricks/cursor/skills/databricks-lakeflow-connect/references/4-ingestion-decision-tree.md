@@ -100,7 +100,7 @@ Use Lakeflow Connect when the source is a system you query. Use Zerobus when the
 
 All four approaches are billed in DBUs (compute time), with no per-row or per-connector fee.
 
-- **Lakeflow Connect**: serverless ingestion pipeline DBUs; database connectors also incur classic-compute gateway DBUs.
+- **Lakeflow Connect**: ingestion pipeline DBUs; standard CDC also bills the always-on gateway's DBUs, on serverless or classic compute, whichever it runs on.
 - **Auto Loader**: serverless or classic compute DBUs depending on where the pipeline runs.
 - **Lakehouse Federation**: SQL warehouse DBUs for the queries that read through the foreign catalog. Plus any costs the source charges.
 - **Delta Sharing**: typically free for the recipient (the provider may charge separately outside Databricks).

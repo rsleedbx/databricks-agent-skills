@@ -28,7 +28,7 @@ There are two ways to run a database CDC connector:
 | PostgreSQL | none yet: standard CDC only | — |
 | All | [smart-closure](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/smart-closure): how long an update runs | — |
 
-From the page, check: release stage, whether it needs `channel: PREVIEW`, whether it supports serverless, classic, or both, and the source prerequisites. If a source now has an integrated CDC page that isn't listed here, use it. If the docs can't be fetched, say so and follow the table above as written. For a source marked "none yet", don't try integrated CDC: offer standard CDC. Don't add settings the table doesn't list (for example, only set `channel: PREVIEW` where the table or docs page requires it). Then let the workspace correct you.
+From the page, check: release stage, whether it needs `channel: PREVIEW`, whether it supports serverless, classic, or both (to know what the default may pick; still leave `serverless` unset, see [Compute: serverless or classic](#compute-serverless-or-classic)), and the source prerequisites. If a source now has an integrated CDC page that isn't listed here, use it. If the docs can't be fetched, say so and follow the table above as written. For a source marked "none yet", don't try integrated CDC: offer standard CDC. Don't add settings the table doesn't list (for example, only set `channel: PREVIEW` where the table or docs page requires it). Then let the workspace correct you.
 
 **The workspace's error wins over the docs and this skill.** For example, a workspace that enforces serverless rejects `serverless: false` with "You must use serverless compute in this workspace". Set `serverless: true` and retry. If it rejects `connector_type: CDC`, integrated CDC isn't enabled on that workspace (the Databricks account team turns it on): tell the user rather than falling back to standard CDC.
 
@@ -64,7 +64,7 @@ A table with neither CDC nor change tracking can't be ingested with CDC: enable 
 
 One pipeline per source. Create the destination schema and a staging schema first; the pipeline creates a staging volume in the staging schema, so it needs `CREATE VOLUME` there.
 
-These fields are stable: `connection_name`, `connector_type: CDC`, `objects`, and `data_staging_options`. Set `serverless` and `channel` from the current docs page and the workspace, as above.
+These fields are stable: `connection_name`, `connector_type: CDC`, `objects`, and `data_staging_options`. Set `channel` from the current docs page, as above. Leave `serverless` out and read back what the pipeline ran on ([Compute: serverless or classic](#compute-serverless-or-classic)).
 
 ```yaml
 resources:
@@ -73,7 +73,7 @@ resources:
       name: <base>                     # <firstname><lastname>-<connection>, see SKILL.md
       catalog: ${var.catalog}
       schema: sqlserver_cdc_raw
-      serverless: true                 # the serverless-only workspace required it (the MySQL page said classic only)
+                                       # serverless: not set; see "Compute: serverless or classic"
       ingestion_definition:
         connection_name: my_sqlserver_connection
         connector_type: CDC
@@ -101,7 +101,7 @@ For MySQL, address tables by `source_schema: <mysql-database>` with no `source_c
       channel: PREVIEW                 # while the MySQL page says it's required
       catalog: ${var.catalog}
       schema: mysql_cdc_raw
-      serverless: true                 # the serverless-only workspace required it (the MySQL page said classic only)
+                                       # serverless: not set; see "Compute: serverless or classic"
       ingestion_definition:
         connection_name: my_mysql_connection
         connector_type: CDC
@@ -191,7 +191,7 @@ Why each piece:
 Trade-offs:
 
 - Two pipelines, two pieces of state. Both must be healthy.
-- Gateway compute is billed separately from the ingestion DBUs. It used to be classic only; leave `serverless` unset and read back what it ran on ([below](#workspace-feature-gates-all-database-sources)). See the [pricing page](https://www.databricks.com/product/pricing/lakeflow-connect) for current rates.
+- Gateway compute is billed separately from the ingestion DBUs. It used to be classic only; leave `serverless` unset and read back what it ran on ([Compute: serverless or classic](#compute-serverless-or-classic)). See the [pricing page](https://www.databricks.com/product/pricing/lakeflow-connect) for current rates.
 - Staging Volume retention is 30 days. Reprocessing further back requires a snapshot reload.
 
 ---
@@ -276,16 +276,23 @@ The gateway compute itself runs on Databricks-managed VPC infrastructure inside 
 
 Each standard CDC source is enabled per workspace. When it isn't, the gateway create fails with `Ingestion source '<SOURCE>' is not supported in your workspace. Please contact Databricks support to enable this feature for your workspace. (403 PERMISSION_DENIED)`. This has been seen for `POSTGRESQL` and `MYSQL` on a workspace where query-based and integrated CDC for the same sources worked, and for `ORACLE` (integrated CDC) and `POSTGRESQL` (gateway) on a workspace where query-based ingestion from both worked. Report it, don't work around it, and offer the modes that weren't refused: for a refused gateway (standard CDC), integrated CDC or query-based; for a refused integrated CDC source, standard CDC where the source has it, else query-based (Oracle has no standard mode, so query-based). A failed `bundle deploy` can still have created the schemas declared before the pipelines: offer `bundle destroy` so nothing is left behind.
 
-The workspace's compute policy also wins. A workspace that requires serverless rejects a classic gateway with "You must use serverless compute in this workspace": set `serverless: true` on the gateway and redeploy.
+---
 
-**Leave `serverless` unset on every pipeline and gateway, read back what the system chose, and change it if that fails.** The UI uses the default too; when the default fails, you change the setting yourself. Defaults change over time and differ by workspace, mode, and source, so don't set `serverless` in the bundle or the REST body unless the workspace or the docs page requires it. After the first update starts, read the choice:
+## Compute: serverless or classic
+
+A workspace's compute policy wins over the docs: a workspace that requires serverless rejects classic compute with "You must use serverless compute in this workspace" (see the first failure below).
+
+**Leave `serverless` unset on every pipeline and gateway, read back what the system chose, and change it if that fails.** The UI uses the default too; when the default fails, you change the setting yourself. Defaults change over time and differ by workspace, mode, and source, so don't set `serverless` in the bundle or the REST body unless the workspace or the docs page requires it. After the first update starts, read the choice. The update ID is the `update_id` that `start-update` returns, or `.latest_updates[0].update_id` from `databricks pipelines get <pipeline-id>`:
 
 ```bash
 databricks pipelines get-update <pipeline-id> <update-id> --profile <PROFILE> -o json \
-  | yq -p json -o tsv '"serverless=" + (.update.config.serverless | tostring) + " cluster=" + (.update.cluster_id // "")'
+  | yq -p json -o tsv '[(.update.config.serverless | tostring), (.update.cluster_id // "none")]'
+# true  none        serverless
+# false <cluster>   classic, on its own cluster
+# null  ...         not decided yet: read it again
 ```
 
-`pipelines get` doesn't tell: its `spec.serverless` stays unset, echoing what you sent. **If the create or the update fails on compute or on reaching the source, set the opposite explicitly and retry.** Tested 2026-10 on two AWS workspaces and an Azure workspace with classic compute:
+`pipelines get` doesn't tell: its `spec.serverless` stays unset, echoing what you sent. **If the create or the update fails on compute or on reaching the source, set the opposite explicitly and retry.** For a query-based pipeline the opposite of serverless is classic compute, which is Beta and needs a `clusters` block as well as `serverless: false` ([3-query-based-connectors.md](3-query-based-connectors.md)); change both in one step and say so. Tested 2026-10 on two AWS workspaces and an Azure workspace with classic compute:
 
 | Workspace | `serverless` unset | Opposite |
 |---|---|---|
@@ -295,7 +302,7 @@ databricks pipelines get-update <pipeline-id> <update-id> --profile <PROFILE> -o
 **Two different failures, at different times.** Tell them apart before changing anything:
 
 - **The compute isn't allowed.** Seen at create, in seconds: `You must use serverless compute in this workspace.` (a gateway left unset on a serverless-only workspace). A classic cluster you aren't allowed to create (no `allow-cluster-create`, no usable cluster policy) should fail here too, before anything connects (not tested yet). Set the opposite and retry.
-- **The compute starts but can't reach the source.** Seen as `Extractor STARTED`, then about a minute later `Extractor FAILED` with `INGESTION_GATEWAY_CONNECTION_ERROR.INCORRECT_SOURCE_HOSTNAME_OR_PORT_SPECIFIED_FAILURE ... Could not connect to the source database`, with the IP's last octet masked as `0`. On the Azure workspace, integrated CDC for MySQL and SQL Server ran on classic and failed this way. The host and port were right: the source's firewall allowed the serverless ranges but not the workspace's classic egress IP, and `remote_query` on the same connection, which runs on serverless, still worked. Read `update.config.serverless`: if it's `false`, set `serverless: true` and retry before checking the host.
+- **The compute starts but can't reach the source.** Seen as `Extractor STARTED`, then about a minute later `Extractor FAILED` with `INGESTION_GATEWAY_CONNECTION_ERROR.INCORRECT_SOURCE_HOSTNAME_OR_PORT_SPECIFIED_FAILURE ... Could not connect to the source database`, with the IP's last octet masked as `0`. On the Azure workspace, integrated CDC for MySQL and SQL Server ran on classic and failed this way. The host and port were right: the source's firewall allowed the serverless ranges but not the workspace's classic egress IP, and `remote_query` on the same connection, which runs on serverless, still worked. The same error also comes from a wrong host or port, so check before flipping: run `remote_query` on the same connection ([7-source-sql-through-connection.md](7-source-sql-through-connection.md)), which runs on serverless. If it reaches the source and `update.config.serverless` is `false`, the host is right and the classic egress IP is what's blocked: set `serverless: true` and retry, or have the classic egress IP added to the source's firewall and rerun as is. If `remote_query` fails the same way, fix the host, port, or network first.
 
 **Classic takes longer to start than serverless, so expect the second failure later on classic.** In the event log (`WAITING_FOR_RESOURCES` until `INITIALIZING`), classic integrated CDC waited 7 min 40 s to 8 min 10 s for its cluster. Serverless pipelines and gateways on the same workspace waited 10 s to 1 min 20 s, and 3 min 50 s once, for the first serverless start there. `update.config.serverless` is set as soon as the update starts, so read it right away to know which wait to expect.
 
