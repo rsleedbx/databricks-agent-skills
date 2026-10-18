@@ -56,15 +56,15 @@ if [ "$CLASSIC" = yes ]; then
   elif [ "${npol:-0}" -gt 0 ]; then row WARN "3 classic: you can create clusters" "no allow-cluster-create; $npol cluster policies visible, so only within a policy" "set the classic gateway's cluster policy_id to one you can use, or use serverless: true"
   else CLASSIC=noperm; row WARN "3 classic: you can create clusters" "no allow-cluster-create and no cluster policy you can use" "use serverless: true, or ask a workspace admin for allow-cluster-create or a policy"; fi
 fi
-# what each mode runs on: a standard CDC gateway runs on classic compute by default (some sources' gateways can run
-# serverless); integrated CDC and query-based pipelines run serverless by default (some sources can run them on classic)
-# leave serverless unset in pipelines and gateways, read the choice back from the update (pipelines get-update:
-# .update.config.serverless), and on a compute error try the opposite: what this workspace leads to expect
+# what each mode runs on: leave serverless unset on every pipeline and gateway (the default; the UI uses it too), read
+# the choice back from the update (pipelines get-update: .update.config.serverless), and if the create or update fails
+# on compute or on reaching the source, set the opposite and retry. Unset, integrated CDC and gateways ran on classic on
+# a classic workspace (Azure), from the workspace's egress IP, which the source's firewall must then allow.
 case $CLASSIC in
-  no)     row INFO "3 modes on this workspace" "leave serverless unset; a gateway left unset is refused here (\"You must use serverless compute\"): set serverless: true for it";;
-  yes)    row INFO "3 modes on this workspace" "leave serverless unset: query-based and integrated CDC ran serverless, a gateway classic (needs its NAT IP in the source firewall); read back with pipelines get-update";;
-  noperm) row INFO "3 modes on this workspace" "leave serverless unset; a gateway defaulting to classic needs cluster creation you don't have: if it fails, set serverless: true";;
-  *)      row INFO "3 modes on this workspace" "leave serverless unset and read back with pipelines get-update; if the create or update fails on compute, try the opposite";;
+  no)     row INFO "3 modes on this workspace" "leave serverless unset; a gateway left unset is refused here (\"You must use serverless compute\"): then set serverless: true";;
+  yes)    row INFO "3 modes on this workspace" "leave serverless unset and read it back (pipelines get-update); CDC pipelines and gateways may run classic here: if one can't reach the source, set serverless: true";;
+  noperm) row INFO "3 modes on this workspace" "leave serverless unset; one that defaults to classic needs cluster creation you don't have: if it fails, set serverless: true";;
+  *)      row INFO "3 modes on this workspace" "leave serverless unset and read back with pipelines get-update; if the create or update fails, set the opposite";;
 esac
 
 # 4. connector previews (Settings API): integrated CDC per engine, column selection. One that's off is turned on
