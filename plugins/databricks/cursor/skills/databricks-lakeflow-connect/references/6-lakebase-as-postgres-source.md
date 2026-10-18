@@ -22,9 +22,9 @@ Collect these before running any create command. Use what the user already gave 
 | CLI profile | none: never auto-select (see **databricks-core**) |
 | Lakebase project: reuse an existing one, or create a new one | reuse `lfc-demo` if it exists, otherwise create it |
 | Target UC catalog (a regular managed catalog, not the Lakebase database catalog) | none: the user must pick |
-| Target schema | `<firstname><lastname>_lfc_demo_raw` (unique per user, so two people's demos in one catalog don't write the same tables; add `_2`, `_3` if taken). Examples below write `<target_schema>`. |
+| Target schema | `<name>`, the same as the pipeline (unique, so two people's demos in one catalog don't write the same tables). Examples below write `<target_schema>`. |
 | Postgres schema for this demo (also names the role and connection) | `lfc_demo` |
-| Pipeline name | `<firstname><lastname>-<connection>` (e.g. `janedoe-lfc_demo_pg_conn`), with `-2`, `-3` if taken; see **Default pipeline names** in SKILL.md |
+| Pipeline, schema, job, and bundle name | `<name>` = `<firstname><lastname>_<connection>_<epoch>` (e.g. `janedoe_lfc_demo_pg_conn_1792351234`); see **Default names** in SKILL.md |
 | Connector | query-based (Lakebase CDC: see the end of this page) |
 | Seed the `lfc_demo` tables from Step 3 | yes |
 | Schedule job | no (run on demand) |
@@ -204,7 +204,7 @@ Write `databricks.yml` in a new, empty directory. Leave out the `jobs` block if 
 
 ```yaml
 bundle:
-  name: <firstname><lastname>_lfc_demo_pg_conn   # unique per pipeline: the pipeline name with - turned into _
+  name: <name>               # janedoe_lfc_demo_pg_conn_<epoch>: the same name as the pipeline, schema, and job
 
 sync:
   exclude:
@@ -222,7 +222,7 @@ targets:
 resources:
   pipelines:
     lakebase_qbc:
-      name: <firstname><lastname>-lfc_demo_pg_conn   # default naming, see SKILL.md; add -2, -3 if taken
+      name: <name>           # default naming, see SKILL.md
       catalog: ${var.catalog}
       schema: <target_schema>
       ingestion_definition:
@@ -255,7 +255,7 @@ resources:
 
   jobs:
     lakebase_qbc_schedule:
-      name: <firstname><lastname>-lfc_demo_pg_conn-schedule   # the pipeline name + -schedule
+      name: <name>           # the pipeline's name: jobs and pipelines are named separately
       trigger:
         periodic:
           interval: 15
@@ -347,7 +347,7 @@ CREATE PUBLICATION <slot_name>_pub FOR TABLE lfc_demo.customers, lfc_demo.orders
 How to read the result:
 
 - **The `CREATE PUBLICATION` fails** with "[Databricks Auth] CREATE PUBLICATION is not enabled on this Lakebase instance": CDC isn't available on this Lakebase yet, even though `wal_level` is `logical` and the role has `REPLICATION` (both are true on current Lakebase). Use query-based. Nothing was created.
-- **It succeeds:** keep the publication and continue with the Postgres CDC section in [2-database-connectors.md](2-database-connectors.md). Name the slot `<slot_name>` and the publication `<slot_name>_pub`, where `<slot_name>` is the pipelines' base name lowercased with `-` turned into `_` (the pipelines are `<base>-gw` / `<base>-ap`; see **Default pipeline names** in SKILL.md). Put the same two names in the ingestion pipeline's `slot_config`. Create the slot after the pipelines deploy: `SELECT pg_create_logical_replication_slot('<slot_name>', 'pgoutput');`. The gateway starts on deploy and retries until the slot exists. If the slot or the pipelines fail, drop what you created (`DROP PUBLICATION <slot_name>_pub;`, `SELECT pg_drop_replication_slot('<slot_name>');`) and fall back to query-based.
+- **It succeeds:** keep the publication and continue with the Postgres CDC section in [2-database-connectors.md](2-database-connectors.md). Name the slot `<slot_name>` and the publication `<slot_name>_pub`, where `<slot_name>` is the schema's name, `<base>_<epoch>` (the pipelines are `<base>_gw_<epoch>` / `<base>_ap_<epoch>`; see **Default names** in SKILL.md). Put the same two names in the ingestion pipeline's `slot_config`. Create the slot after the pipelines deploy: `SELECT pg_create_logical_replication_slot('<slot_name>', 'pgoutput');`. The gateway starts on deploy and retries until the slot exists. If the slot or the pipelines fail, drop what you created (`DROP PUBLICATION <slot_name>_pub;`, `SELECT pg_drop_replication_slot('<slot_name>');`) and fall back to query-based.
 
 Lakebase-specific checks once CDC works:
 

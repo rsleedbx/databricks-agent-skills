@@ -70,7 +70,7 @@ These fields are stable: `connection_name`, `connector_type: CDC`, `objects`, an
 resources:
   pipelines:
     sqlserver_cdc:
-      name: <base>                     # <firstname><lastname>-<connection>, see SKILL.md
+      name: <name>                     # <firstname><lastname>_<connection>_<epoch>, see SKILL.md
       catalog: ${var.catalog}
       schema: sqlserver_cdc_raw
       ingestion_definition:
@@ -96,7 +96,7 @@ For MySQL, address tables by `source_schema: <mysql-database>` with no `source_c
 
 ```yaml
     mysql_cdc:
-      name: <base>
+      name: <name>
       channel: PREVIEW                 # while the MySQL page says it's required
       catalog: ${var.catalog}
       schema: mysql_cdc_raw
@@ -234,7 +234,7 @@ A DAB stub with both pipelines:
 resources:
   pipelines:
     sqlserver_gateway:
-      name: <base>-gw                  # <firstname><lastname>-<connection>-gw, see SKILL.md
+      name: <base>_gw_<epoch>          # <firstname><lastname>_<connection>_gw_<epoch>, see SKILL.md
       gateway_definition:
         connection_name: my_sqlserver_connection
         gateway_storage_catalog: ${var.catalog}
@@ -242,7 +242,7 @@ resources:
         gateway_storage_name: sqlserver_gateway_storage
 
     sqlserver_ingestion:
-      name: <base>-ap                  # same number as the gateway if you add one (-gw-2 / -ap-2)
+      name: <base>_ap_<epoch>          # the same epoch as the gateway
       ingestion_definition:
         ingestion_gateway_id: ${resources.pipelines.sqlserver_gateway.id}
         objects:
@@ -342,8 +342,8 @@ ALTER USER databricks_replication WITH REPLICATION;
 -- Tables with a PK and no large TOASTable columns: DEFAULT. Otherwise (or no PK): FULL.
 ALTER TABLE <schema>.<table> REPLICA IDENTITY DEFAULT;
 
--- One publication and one slot per pipeline, named after the pipeline: <slot_name> is the pipeline's
--- base name lowercased with '-' -> '_' (e.g. janedoe_my_pg_conn_2). Never share either between pipelines.
+-- One publication and one slot per pipeline pair, named after it: <slot_name> is <base>_<epoch>, the
+-- schema's name (e.g. janedoe_my_pg_conn_1792351234). Never share either between pipelines.
 CREATE PUBLICATION <slot_name>_pub FOR TABLE <schema>.<table1>, <schema>.<table2>;
 
 -- Slot: only pgoutput is supported, and a slot has one consumer at a time. Create it after the pipelines
@@ -366,7 +366,7 @@ The UC connection uses `connection_type: POSTGRESQL` with the replication user's
 resources:
   pipelines:
     pg_gateway:
-      name: <base>-gw
+      name: <base>_gw_<epoch>
       gateway_definition:
         connection_name: my_pg_connection
         gateway_storage_catalog: ${var.catalog}
@@ -374,7 +374,7 @@ resources:
         gateway_storage_name: pg_gateway_storage
 
     pg_ingestion:
-      name: <base>-ap
+      name: <base>_ap_<epoch>
       ingestion_definition:
         ingestion_gateway_id: ${resources.pipelines.pg_gateway.id}
         source_type: POSTGRESQL
