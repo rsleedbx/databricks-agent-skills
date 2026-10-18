@@ -304,7 +304,7 @@ resources:
 
 Keep scratch files (the Step 0 discovery `.sql` files, report queries) out of the bundle directory, for example in a `queries/` folder listed under `sync.exclude`. Otherwise `bundle deploy` uploads them to the workspace.
 
-The pipeline is serverless by default: leave `serverless` out of the bundle, and read back what it ran on ([2-database-connectors.md](2-database-connectors.md#workspace-feature-gates-all-database-sources)). Classic compute is Beta (`serverless: false` plus a `clusters` block); prefer serverless.
+The pipeline is serverless by default: leave `serverless` out of the bundle, and read back what it ran on ([2-database-connectors.md](2-database-connectors.md#compute-serverless-or-classic)). Classic compute is Beta (`serverless: false` plus a `clusters` block); prefer serverless.
 
 **Foreign catalog variant** — if the source is already a Lakehouse Federation foreign catalog, set `ingest_from_uc_foreign_catalog: true` under `ingestion_definition`, and set `source_catalog` to the foreign catalog name. `primary_keys` is required unless `scd_type` is `APPEND_ONLY`.
 
