@@ -284,7 +284,11 @@
         "references/4-ingestion-decision-tree.md",
         "references/5-troubleshooting-and-monitoring.md",
         "references/6-lakebase-as-postgres-source.md",
-        "references/7-source-sql-through-connection.md"
+        "references/7-source-sql-through-connection.md",
+        "references/8-workspace-readiness.md",
+        "scripts/check.sh",
+        "scripts/grant.sh",
+        "scripts/ready.sh"
       ],
       "repo_dir": "skills",
       "version": "0.2.0"
