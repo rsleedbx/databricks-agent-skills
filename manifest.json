@@ -288,7 +288,8 @@
         "references/8-workspace-readiness.md",
         "scripts/check.sh",
         "scripts/grant.sh",
-        "scripts/ready.sh"
+        "scripts/ready.sh",
+        "scripts/serverless-egress.sh"
       ],
       "repo_dir": "skills",
       "version": "0.2.0"
