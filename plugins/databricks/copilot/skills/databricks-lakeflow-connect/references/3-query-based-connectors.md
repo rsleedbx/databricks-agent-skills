@@ -262,7 +262,7 @@ GRANT SELECT ON public.orders, public.customers TO <pg-user>;
 resources:
   pipelines:
     pg_query_based:
-      name: <base>                     # <firstname><lastname>-<connection>, see SKILL.md
+      name: <name>                     # <firstname><lastname>_<connection>_<epoch>, see SKILL.md
       catalog: ${var.catalog}
       schema: pg_raw
       ingestion_definition:
@@ -318,7 +318,7 @@ QBC is triggered-only, like every Lakeflow Connect pipeline. Each run is one inc
 resources:
   jobs:
     pg_query_based_schedule:
-      name: <base>-schedule            # the pipeline name + -schedule
+      name: <name>                     # the pipeline's name: jobs and pipelines are named separately
       trigger:
         periodic:
           interval: 1
