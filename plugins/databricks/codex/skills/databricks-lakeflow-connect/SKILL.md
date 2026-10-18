@@ -269,6 +269,19 @@ query_based_connector_config: {cursor_columns: [updated_at]}
 
 ---
 
+## Read every error and warning, then recover and continue
+
+Lakeflow Connect changes quickly. Defaults, compute options, and which sources a workspace allows move from release to release, and the workspace's own message is usually more current than the docs or this skill. After every create, deploy, and update:
+
+1. **Read the full message.** That's the CLI or API error, the bundle deploy output (warnings included), and for an update, the `ERROR` and `WARN` events in the event log (`databricks pipelines list-pipeline-events <pipeline-id>`). Don't stop at a status of `FAILED`.
+2. **Decide what it asks for.** Usually one of four things:
+   - **A setting to change.** For example, "You must use serverless compute in this workspace" means set `serverless: true` and redeploy. A `channel` or connector-type message means take the value it names.
+   - **A missing grant**, for example "does not have CREATE CATALOG on Metastore". Report the privilege and who can grant it, and don't work around it.
+   - **A feature that isn't enabled**, for example "Ingestion source '<SOURCE>' is not supported in your workspace" ([feature gates](references/2-database-connectors.md#workspace-feature-gates-all-database-sources)). Report it and offer the modes that work.
+   - **A source-side fix:** network, credentials, CDC setup on the database.
+3. **Fix that one thing, then retry the same step.** Change one thing at a time, so the next message tells you whether the fix worked. When the error gives a way forward, take it and move on to the next step; don't restart from the beginning.
+4. **Clean up what a failed step left behind.** For example, a failed `bundle deploy` can still have created its schemas. Report what's left, and which errors the workspace showed, in your summary.
+
 ## Common Issues
 
 For common errors and their fixes — duplicate-key violations, watermark / cursor problems, schema evolution, gateway region availability, the `channel` runtime-channel setting, and pipelines that run but land no data — see [5-troubleshooting-and-monitoring.md](references/5-troubleshooting-and-monitoring.md), which also has the event-log queries to diagnose them.
