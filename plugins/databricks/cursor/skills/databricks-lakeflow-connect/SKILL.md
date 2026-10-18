@@ -283,7 +283,9 @@ Lakeflow Connect changes quickly. Defaults, compute options, and which sources a
    - **A feature that isn't enabled**, for example "Ingestion source '<SOURCE>' is not supported in your workspace" ([feature gates](references/2-database-connectors.md#workspace-feature-gates-all-database-sources)). Report it and offer the modes that work.
    - **A source-side fix:** network, credentials, CDC setup on the database.
 3. **Fix that one thing, then retry the same step.** Change one thing at a time, so the next message tells you whether the fix worked. When the error gives a way forward, take it and move on to the next step; don't restart from the beginning.
-4. **Clean up what a failed step left behind.** For example, a failed `bundle deploy` can still have created its schemas. Report what's left, and which errors the workspace showed, in your summary.
+4. **Clean up what a failed step left behind.** For example, a failed `bundle deploy` can still have created the schemas declared before the pipelines: offer `bundle destroy` ([feature gates](references/2-database-connectors.md#workspace-feature-gates-all-database-sources)). Report what's left, and which errors the workspace showed, in your summary.
+
+---
 
 ## Common Issues
 

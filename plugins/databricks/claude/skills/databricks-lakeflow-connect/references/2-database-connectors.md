@@ -30,7 +30,7 @@ There are two ways to run a database CDC connector:
 
 From the page, check: release stage, whether it needs `channel: PREVIEW`, whether it supports serverless, classic, or both (to know what the default may pick; still leave `serverless` unset, see [Compute: serverless or classic](#compute-serverless-or-classic)), and the source prerequisites. If a source now has an integrated CDC page that isn't listed here, use it. If the docs can't be fetched, say so and follow the table above as written. For a source marked "none yet", don't try integrated CDC: offer standard CDC. Don't add settings the table doesn't list (for example, only set `channel: PREVIEW` where the table or docs page requires it). Then let the workspace correct you.
 
-**The workspace's error wins over the docs and this skill.** For example, a workspace that enforces serverless rejects `serverless: false` with "You must use serverless compute in this workspace". Set `serverless: true` and retry. If it rejects `connector_type: CDC`, integrated CDC isn't enabled on that workspace (the Databricks account team turns it on): tell the user rather than falling back to standard CDC.
+**The workspace's error wins over the docs and this skill.** For example, a workspace that enforces serverless rejects classic compute (a `serverless` left unset that defaults to classic, or `serverless: false`) with "You must use serverless compute in this workspace". Set `serverless: true` and retry. If it rejects `connector_type: CDC`, integrated CDC isn't enabled on that workspace (the Databricks account team turns it on): tell the user rather than falling back to standard CDC.
 
 ### Source prerequisites
 
@@ -73,7 +73,6 @@ resources:
       name: <base>                     # <firstname><lastname>-<connection>, see SKILL.md
       catalog: ${var.catalog}
       schema: sqlserver_cdc_raw
-                                       # serverless: not set; see "Compute: serverless or classic"
       ingestion_definition:
         connection_name: my_sqlserver_connection
         connector_type: CDC
@@ -93,7 +92,7 @@ resources:
 
 Tested on a serverless-only workspace (Azure, 2026-10), against containers on a cloud VM: SQL Server 2022 (change tracking on a table with a primary key, SQL Server CDC on one without), MySQL 8.4, and Oracle 23ai Free (integrated, `channel: PREVIEW`, `serverless: true`, `source_catalog` = the PDB, `FREEPDB1`, with the connection's `service_name` = the CDB's service; see [3-query-based-connectors.md](3-query-based-connectors.md) Step 1). Each took the snapshot, then applied 3 inserts, 2 updates, and 2 deletes per table within about 3 minutes while the update was still running. Tables without a primary key ended up with the same rows as the source.
 
-For MySQL, address tables by `source_schema: <mysql-database>` with no `source_catalog`, and add `channel: PREVIEW` while the docs page requires it. The MySQL page said classic compute only, but the serverless-only workspace rejected `serverless: false` ("You must use serverless compute in this workspace"), and `serverless: true` then created a pipeline that ran correctly:
+For MySQL, address tables by `source_schema: <mysql-database>` with no `source_catalog`, and add `channel: PREVIEW` while the docs page requires it. The MySQL page said classic compute only, but the serverless-only workspace refused classic ("You must use serverless compute in this workspace"), and the retry with `serverless: true` ran correctly. The example leaves `serverless` out, as everywhere: add `serverless: true` only when the workspace asks for it, as that one did.
 
 ```yaml
     mysql_cdc:
@@ -101,7 +100,6 @@ For MySQL, address tables by `source_schema: <mysql-database>` with no `source_c
       channel: PREVIEW                 # while the MySQL page says it's required
       catalog: ${var.catalog}
       schema: mysql_cdc_raw
-                                       # serverless: not set; see "Compute: serverless or classic"
       ingestion_definition:
         connection_name: my_mysql_connection
         connector_type: CDC
@@ -292,12 +290,13 @@ databricks pipelines get-update <pipeline-id> <update-id> --profile <PROFILE> -o
 # null  ...         not decided yet: read it again
 ```
 
-`pipelines get` doesn't tell: its `spec.serverless` stays unset, echoing what you sent. **If the create or the update fails on compute or on reaching the source, set the opposite explicitly and retry.** For a query-based pipeline the opposite of serverless is classic compute, which is Beta and needs a `clusters` block as well as `serverless: false` ([3-query-based-connectors.md](3-query-based-connectors.md)); change both in one step and say so. Tested 2026-10 on two AWS workspaces and an Azure workspace with classic compute:
+`pipelines get` doesn't tell: its `spec.serverless` stays unset, echoing what you sent. **If the create fails on compute, or the update can't reach the source, find out which first (see the two failures below), then set the opposite explicitly and retry.** A wrong host or port, or a source down, gives the same connection error on either compute: flipping won't fix it. For a query-based pipeline the opposite of serverless is classic compute, which is Beta and needs a `clusters` block as well as `serverless: false` ([3-query-based-connectors.md](3-query-based-connectors.md)); change both in one step and say so. Tested 2026-10 on two AWS workspaces and an Azure workspace with classic compute:
 
 | Workspace | `serverless` unset | Opposite |
 |---|---|---|
 | Classic compute available (AWS, Azure) | Query-based: `config.serverless=true`. Gateway: `false` (classic, its own cluster). Integrated CDC, MySQL and SQL Server (Azure): `false`, classic, its own cluster | Integrated CDC and gateway with `serverless: true`: ran serverless |
 | Serverless-only (AWS) | Query-based: `true`. Gateway: refused at create with `You must use serverless compute in this workspace.` | Gateway with `serverless: true`: created and started (`config.serverless=true`) |
+| Any | Standard CDC ingestion pipeline (the applier): not tested unset; with `serverless: true` it ran serverless on AWS and Azure | |
 
 **Two different failures, at different times.** Tell them apart before changing anything:
 
