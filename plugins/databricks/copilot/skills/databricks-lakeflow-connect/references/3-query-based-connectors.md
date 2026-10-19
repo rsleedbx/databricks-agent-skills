@@ -264,7 +264,7 @@ resources:
     pg_query_based:
       name: <name>                     # <firstname><lastname>_<connection>_<epoch>, see SKILL.md
       catalog: ${var.catalog}
-      schema: pg_raw
+      schema: <name>                   # the same name as the pipeline
       ingestion_definition:
         connection_name: pg_source_conn
         objects:
@@ -273,7 +273,7 @@ resources:
               source_schema: public
               source_table: orders
               destination_catalog: ${var.catalog}
-              destination_schema: pg_raw
+              destination_schema: <name>
               table_configuration:
                 scd_type: SCD_TYPE_1              # SCD_TYPE_1 | SCD_TYPE_2 | APPEND_ONLY
                 primary_keys: [order_id]
@@ -285,7 +285,7 @@ resources:
               source_schema: public
               source_table: customers
               destination_catalog: ${var.catalog}
-              destination_schema: pg_raw
+              destination_schema: <name>
               table_configuration:
                 scd_type: SCD_TYPE_2              # keeps history: __START_AT / __END_AT
                 primary_keys: [customer_id]

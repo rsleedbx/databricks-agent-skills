@@ -27,7 +27,7 @@ For event-log table conventions (filtering by `event_type`, joining with metrics
 
 ## Rows per table per run (snapshot inserts, upserts, deletes)
 
-Use this when the user asks what each run did: how many rows each table took in its snapshot, upserted, appended, or deleted, and whether that run was a snapshot, a full refresh, or incremental. It works for query-based, integrated CDC, and standard CDC (run it on the ingestion pipeline, `-ap`) pipelines. It reads only the event log and returns in a few seconds.
+Use this when the user asks what each run did: how many rows each table took in its snapshot, upserted, appended, or deleted, and whether that run was a snapshot, a full refresh, or incremental. It works for query-based, integrated CDC, and standard CDC (run it on the ingestion pipeline, `<base>_ap_<epoch>`) pipelines. It reads only the event log and returns in a few seconds.
 
 Write the query below to `rows_per_run.sql` with your file tool, replacing `<pipeline-id>`. Then run it:
 

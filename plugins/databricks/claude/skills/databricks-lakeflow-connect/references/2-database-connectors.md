@@ -72,7 +72,7 @@ resources:
     sqlserver_cdc:
       name: <name>                     # <firstname><lastname>_<connection>_<epoch>, see SKILL.md
       catalog: ${var.catalog}
-      schema: sqlserver_cdc_raw
+      schema: <name>                   # the same name as the pipeline
       ingestion_definition:
         connection_name: my_sqlserver_connection
         connector_type: CDC
@@ -82,7 +82,7 @@ resources:
               source_schema: dbo
               source_table: customers
               destination_catalog: ${var.catalog}
-              destination_schema: sqlserver_cdc_raw
+              destination_schema: <name>
               table_configuration:
                 scd_type: SCD_TYPE_1     # SCD_TYPE_2 needs SQL Server CDC, not change tracking
         data_staging_options:
@@ -99,7 +99,7 @@ For MySQL, address tables by `source_schema: <mysql-database>` with no `source_c
       name: <name>
       channel: PREVIEW                 # while the MySQL page says it's required
       catalog: ${var.catalog}
-      schema: mysql_cdc_raw
+      schema: <name>
       ingestion_definition:
         connection_name: my_mysql_connection
         connector_type: CDC
@@ -108,7 +108,7 @@ For MySQL, address tables by `source_schema: <mysql-database>` with no `source_c
               source_schema: <mysql-database>
               source_table: orders
               destination_catalog: ${var.catalog}
-              destination_schema: mysql_cdc_raw
+              destination_schema: <name>
         data_staging_options:
           catalog_name: ${var.catalog}
           schema_name: mysql_cdc_staging
@@ -251,7 +251,7 @@ resources:
               source_schema: dbo
               source_table: orders
               destination_catalog: ${var.catalog}
-              destination_schema: sqlserver_raw
+              destination_schema: <base>_<epoch>   # the schema takes the pair's name
 ```
 
 The SDK Python equivalent uses `w.pipelines.create` twice — once with `gateway_definition`, once with `ingestion_definition` referencing the gateway's pipeline ID.
@@ -342,8 +342,8 @@ ALTER USER databricks_replication WITH REPLICATION;
 -- Tables with a PK and no large TOASTable columns: DEFAULT. Otherwise (or no PK): FULL.
 ALTER TABLE <schema>.<table> REPLICA IDENTITY DEFAULT;
 
--- One publication and one slot per pipeline pair, named after it: <slot_name> is <base>_<epoch>, the
--- schema's name (e.g. janedoe_my_pg_conn_1792351234). Never share either between pipelines.
+-- One publication and one slot per pipeline pair, named after it: <slot_name> is the pair's <base>_<epoch>
+-- (e.g. janedoe_my_pg_conn_1792351234), not the destination schema's name. Never share either between pipelines.
 CREATE PUBLICATION <slot_name>_pub FOR TABLE <schema>.<table1>, <schema>.<table2>;
 
 -- Slot: only pgoutput is supported, and a slot has one consumer at a time. Create it after the pipelines
@@ -391,7 +391,7 @@ resources:
               source_schema: public
               source_table: orders
               destination_catalog: ${var.catalog}
-              destination_schema: pg_raw
+              destination_schema: <base>_<epoch>
 ```
 
 Check the `source_configurations` shape against the [connector reference](https://docs.databricks.com/ingestion/lakeflow-connect/) for your CLI version — it is Public Preview and may change.
