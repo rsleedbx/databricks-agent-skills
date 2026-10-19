@@ -164,13 +164,12 @@ git checkout -b <branch>
 PROFILE="<omnigent-profile>"
 WS_BASE="/Users/<email>/skill-files"
 
-# Download each file, stripping the notebook header
-for f in \
-  CLAUDE.md \
-  manifest.json \
-  skills/<skill-name>/SKILL.md \
-  skills/<skill-name>/references/2-database-connectors.md \
-  skills/<skill-name>/references/3-new-file.md
+# Download every file the sandbox uploaded (the same set as its glob), stripping the notebook header
+files=(CLAUDE.md manifest.json skills/<skill-name>/SKILL.md)
+for p in $(databricks workspace list "$WS_BASE/skills/<skill-name>/references" --profile "$PROFILE" -o json | yq -r '.[].path'); do
+  files+=("${p#$WS_BASE/}")
+done
+for f in "${files[@]}"
 do
   mkdir -p "$(dirname "$f")"
   databricks workspace export "$WS_BASE/$f" --profile "$PROFILE" > "$f.tmp"

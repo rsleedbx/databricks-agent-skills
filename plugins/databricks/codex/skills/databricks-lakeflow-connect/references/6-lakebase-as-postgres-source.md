@@ -39,7 +39,7 @@ If the user supplied everything up front and asked you to deploy, the request is
 
 **Reuse or create, per Step 0.** Don't create a project or branch without the user's go-ahead; a new project starts billable compute. Use a dedicated project or branch so seeding and mutating tables doesn't touch anything real.
 
-The default name `lfc-demo` doesn't mention a connector type, so the same project can serve the Postgres CDC demo once Lakebase supports it, and other demos that need a source database (for example Zerobus). **Name everything per demo, after its Postgres schema.** In a shared project, each demo gets its own schema, reader role, and UC connection: `<schema>`, `<schema>_reader`, `<schema>_pg_conn` (here `lfc_demo`, `lfc_demo_reader`, `lfc_demo_pg_conn`). Postgres reserves role names starting with `pg_`, so don't start the schema name with `pg_`. If the default schema name is already taken, pick a new one rather than sharing it. Never reuse or `ALTER` another demo's role or delete its connection: re-running `role.sql` resets the password, which breaks every connection that uses that role. List what's already there before you pick names:
+The default name `lfc-demo` doesn't mention a connector type, so the same project can serve the Postgres CDC demo once Lakebase supports it, and other demos that need a source database (for example Zerobus). **Name everything per demo, after its Postgres schema.** In a shared project, each demo gets its own schema, reader role, and UC connection: `<schema>`, `<schema>_reader`, `<schema>_pg_conn` (here `lfc_demo`, `lfc_demo_reader`, `lfc_demo_pg_conn`). Postgres reserves role names starting with `pg_`, so don't start the schema name with `pg_`. If the default schema name is already taken, pick a new one rather than sharing it. Never reuse or `ALTER` another demo's role or delete its connection: resetting a role's password breaks every connection that uses it, so `role.sql` refuses an existing role unless you pass `-v rotate=1` for this demo's own. List what's already there before you pick names:
 
 ```bash
 databricks psql --project <project-id> --profile <PROFILE> -- -X -At \
@@ -90,7 +90,11 @@ Let Postgres generate the password, set it on the role, and write the Step 4 con
 SELECT replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '') AS pw \gset
 SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'lfc_demo_reader') AS role_exists \gset
 \if :role_exists
-ALTER ROLE lfc_demo_reader WITH LOGIN PASSWORD :'pw';
+\if :{?rotate}
+ALTER ROLE lfc_demo_reader WITH LOGIN PASSWORD :'pw';   -- this demo's own role, rotated on purpose
+\else
+DO $$ BEGIN RAISE EXCEPTION 'role lfc_demo_reader already exists: pick a new schema name, or pass -v rotate=1 to rotate this demo''s own password'; END $$;
+\endif
 \else
 CREATE ROLE lfc_demo_reader WITH LOGIN PASSWORD :'pw';
 \endif
@@ -108,7 +112,7 @@ databricks psql --project <project-id> --profile <PROFILE> -- \
   -X -At -v ON_ERROR_STOP=1 -v host=<lakebase-endpoint-host> -f role.sql
 ```
 
-`\gset` stores a query result in a psql variable, and psql substitutes `:'pw'` in `-f` files (not in `-c` strings). `conn.json` holds the password: never print, `cat`, or open it with a file-read tool, and delete it in Step 4. If you can't delete it, leave it untouched and tell the user to delete it. Re-running `role.sql` rotates the password, so re-create or update the connection afterwards.
+`\gset` stores a query result in a psql variable, and psql substitutes `:'pw'` in `-f` files (not in `-c` strings). `conn.json` holds the password: never print, `cat`, or open it with a file-read tool, and delete it in Step 4. If you can't delete it, leave it untouched and tell the user to delete it. If the role already exists, `role.sql` stops with an error rather than resetting a password another demo may use. To rotate this demo's own password on purpose, add `-v rotate=1`, then update the connection with the new `conn.json`.
 
 Schema and table grants come at the end of Step 3, once the schema exists. If password logins are rejected, check whether native Postgres password auth is enabled for the project (see the Lakebase connectivity docs).
 
@@ -317,6 +321,7 @@ Then show what each run did, per table: run the **Rows per table per run** query
 
 ```bash
 databricks bundle destroy -t dev --var catalog=<catalog> --profile <PROFILE>
+databricks schemas delete <catalog>.<target_schema> --force --profile <PROFILE>   # created in Step 5, not by the bundle
 databricks connections delete lfc_demo_pg_conn --profile <PROFILE>
 rm -f conn.json
 ```

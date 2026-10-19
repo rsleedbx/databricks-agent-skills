@@ -1,6 +1,6 @@
 ---
 name: databricks-lakeflow-connect
-description: "Build managed ingestion pipelines into Databricks using Lakeflow Connect. Use when ingesting from SaaS apps (Salesforce, Workday Reports, ServiceNow, Google Analytics 4, HubSpot, Confluence) or databases (SQL Server cloud and on-prem, integrated single-pipeline or standard gateway CDC; MySQL integrated CDC; PostgreSQL/MySQL standard CDC; query-based ingestion from Oracle, Teradata, SQL Server, PostgreSQL, MySQL, MariaDB using a cursor column) into Unity Catalog with serverless pipelines. Also use when demoing the Postgres connector with Lakebase as a stand-in PostgreSQL source."
+description: "Build managed ingestion pipelines into Databricks using Lakeflow Connect. Use when ingesting from SaaS apps (Salesforce, Workday Reports, ServiceNow, Google Analytics 4, HubSpot, Confluence) or databases (SQL Server cloud and on-prem, integrated single-pipeline or standard gateway CDC; MySQL and Oracle integrated CDC; PostgreSQL/MySQL standard CDC; query-based ingestion from Oracle, Teradata, SQL Server, PostgreSQL, MySQL, MariaDB using a cursor column) into Unity Catalog with serverless pipelines. Also use when demoing the Postgres connector with Lakebase as a stand-in PostgreSQL source."
 compatibility: Requires databricks CLI (>= v0.294.0)
 metadata:
   version: "0.2.0"
@@ -28,7 +28,7 @@ Three frames to keep in mind:
 There are five architecture patterns:
 
 1. **SaaS pull** — connector reads from an external SaaS via OAuth or API key, lands in a streaming Delta table.
-2. **Integrated database CDC** (the default for CDC) — one pipeline reads the change log (SQL Server CDC / change tracking, MySQL binlog) inside each update and applies the changes into Delta. No separate gateway. Set with `connection_name` + `connector_type: CDC`. Source support, release stage, and compute options change often: check the current docs before building (see [2-database-connectors.md](references/2-database-connectors.md#integrated-cdc-default-vs-standard-cdc)). When this was written: SQL Server GA, MySQL Beta, PostgreSQL not available.
+2. **Integrated database CDC** (the default for CDC) — one pipeline reads the change log (SQL Server CDC / change tracking, MySQL binlog, Oracle redo log) inside each update and applies the changes into Delta. No separate gateway. Set with `connection_name` + `connector_type: CDC`. Source support, release stage, and compute options change often: check the current docs before building (see [2-database-connectors.md](references/2-database-connectors.md#integrated-cdc-default-vs-standard-cdc)). When this was written: SQL Server GA, MySQL Beta, Oracle Beta (`channel: PREVIEW`), PostgreSQL not available.
 3. **Standard database CDC via gateway** — only when the user asks for standard / two-pipeline / gateway CDC, or the source has no integrated CDC. An always-on ingestion gateway stages change events to a UC Volume, and a serverless ingestion pipeline applies them as CDC into Delta.
 4. **Query-based** — for sources without CDC enabled (Oracle / Teradata / SQL Server / PG / MySQL / MariaDB, or any Lakehouse Federation foreign catalog), a single serverless pipeline queries for rows past a cursor column's high-water mark on each run. No gateway, no staging Volume.
 5. **Community connectors** — template-based, out of scope for this skill.
@@ -82,6 +82,7 @@ Production-supported. Configuration may evolve before GA. Rows that link to the 
 |--------|------|------|-----------|
 | PostgreSQL CDC | Database CDC (standard, gateway); no integrated CDC yet | Replication user + logical replication | [2-database-connectors.md](references/2-database-connectors.md) |
 | MySQL CDC | Integrated CDC (default; Beta when written) or standard (gateway) | DB user + binlog | [2-database-connectors.md](references/2-database-connectors.md#integrated-cdc-default-vs-standard-cdc) |
+| Oracle CDC | Integrated CDC (Beta when written, `channel: PREVIEW`); no standard mode | DB user; connection `service_name` = the CDB's service | [2-database-connectors.md](references/2-database-connectors.md#integrated-cdc-default-vs-standard-cdc) |
 | Oracle / Teradata / SQL Server / PG / MySQL / MariaDB (query-based) | Database query, serverless, no gateway | Read-only DB user + cursor column | [3-query-based-connectors.md](references/3-query-based-connectors.md) |
 | Snowflake / Redshift / Synapse / BigQuery (Foreign Catalog) | Database query | Foreign Catalog | [3-query-based-connectors.md](references/3-query-based-connectors.md) |
 | SFTP | File pull | Key / password | [connector docs](https://docs.databricks.com/ingestion/lakeflow-connect/) |

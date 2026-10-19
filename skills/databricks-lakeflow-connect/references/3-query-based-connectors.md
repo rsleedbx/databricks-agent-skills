@@ -199,7 +199,7 @@ SELECT * FROM remote_query('<connection>', database => '<database>', query => "
    WHERE t.is_ms_shipped = 0") ORDER BY table_schema, table_name
 ```
 
-**Oracle:** the query runs in the connection's own service. In a multi-tenant database, use a connection whose `service_name` is the PDB (for example `FREEPDB1`) for these queries: once a connection has a `service_name`, a `service_name =>` argument to `remote_query` is ignored (tested: with the connection on the CDB service `FREE`, the query landed in `CDB$ROOT` and saw none of the PDB's tables, whatever the argument said), so the query below passes none. Names come back in uppercase, and the pipeline needs them that way.
+**Oracle:** run these queries through a connection whose `service_name` is the PDB (for example `FREEPDB1`); why, and which connection the pipeline uses instead, is in the Oracle row of the [Step 1 table](#step-1--uc-connection). The query below passes no `service_name`. Names come back in uppercase, and the pipeline needs them that way.
 
 ```sql
 SELECT * FROM remote_query('<pdb-connection>', query => "
@@ -230,10 +230,12 @@ A query-based pipeline points at a regular Unity Catalog connection (the same ob
 
 ```bash
 umask 077
-jq -n --rawfile pw <user>.pw '{name: "<connection>", connection_type: "POSTGRESQL",
+jq -n --rawfile pw <password-file> '{name: "<connection>", connection_type: "POSTGRESQL",
   options: {host: "<host>", port: "5432", user: "<user>", password: ($pw | rtrimstr("\n"))}}' > conn.json
 databricks connections create --json @conn.json --profile <PROFILE>; rm -f conn.json
 ```
+
+`<password-file>` holds only the password, mode 600, outside the bundle directory so `bundle deploy` never uploads it. Delete it when you no longer need it, unless it's where the user keeps that password.
 
 Per source (each tested end to end with a query-based pipeline):
 
@@ -312,7 +314,7 @@ The pipeline is serverless by default: leave `serverless` out of the bundle, and
 
 ## Step 3 — schedule
 
-QBC is triggered-only, like every Lakeflow Connect pipeline. Each run is one incremental pull, so the schedule *is* the freshness SLA.
+QBC pipelines are triggered: each run is one incremental pull, so the schedule *is* the freshness SLA. (A standard CDC gateway, by contrast, runs continuously until you stop it.)
 
 ```yaml
 resources:
