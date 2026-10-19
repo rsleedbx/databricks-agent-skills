@@ -87,7 +87,7 @@ resources:
                 scd_type: SCD_TYPE_1     # SCD_TYPE_2 needs SQL Server CDC, not change tracking
         data_staging_options:
           catalog_name: ${var.catalog}
-          schema_name: sqlserver_cdc_staging
+          schema_name: <name>_staging   # create it with the destination schema
 ```
 
 Tested on a serverless-only workspace (Azure, 2026-10), against containers on a cloud VM: SQL Server 2022 (change tracking on a table with a primary key, SQL Server CDC on one without), MySQL 8.4, and Oracle 23ai Free (integrated, `channel: PREVIEW`, `serverless: true`, `source_catalog` = the PDB, `FREEPDB1`, with the connection's `service_name` = the CDB's service; see [3-query-based-connectors.md](3-query-based-connectors.md) Step 1). Each took the snapshot, then applied 3 inserts, 2 updates, and 2 deletes per table within about 3 minutes while the update was still running. Tables without a primary key ended up with the same rows as the source.
@@ -111,8 +111,10 @@ For MySQL, address tables by `source_schema: <mysql-database>` with no `source_c
               destination_schema: <name>
         data_staging_options:
           catalog_name: ${var.catalog}
-          schema_name: mysql_cdc_staging
+          schema_name: <name>_staging
 ```
+
+**Clean up** an integrated CDC pipeline in this order: delete the pipeline (`databricks bundle destroy`, or `databricks pipelines delete <pipeline-id>`), then both schemas, which also removes the staging volume: `databricks schemas delete <catalog>.<name> --force` and `databricks schemas delete <catalog>.<name>_staging --force`. The bundle doesn't own schemas you created by hand, so `bundle destroy` leaves them.
 
 ### How an update runs: smart closure
 
@@ -398,12 +400,14 @@ Check the `source_configurations` shape against the [connector reference](https:
 
 **Each pipeline needs its own publication and slot.** The gateway doesn't create either one, and a slot can't be shared. If all you have is the UC connection, create and drop the slot with the notebook in [7-source-sql-through-connection.md](7-source-sql-through-connection.md). `CREATE PUBLICATION` can't go through the connection, so the user runs that one statement.
 
-### Verify the source before creating the gateway
+### Verify the source: before deploying, and the slot after
+
+Before `bundle deploy`, the role, the publication and the replica identity must be in place, and no slot may have this pipeline's name yet. The slot itself comes after the pipelines deploy (see above): then the same slot query shows it, `active` once the gateway runs.
 
 ```sql
 SELECT rolname, rolreplication FROM pg_roles WHERE rolname = 'databricks_replication';
 SELECT * FROM pg_publication WHERE pubname = '<slot_name>_pub';
-SELECT slot_name, plugin, active, restart_lsn FROM pg_replication_slots;
+SELECT slot_name, plugin, active, restart_lsn FROM pg_replication_slots WHERE slot_name = '<slot_name>';   -- none before deploy
 SELECT c.relname, c.relreplident FROM pg_class c
   JOIN pg_namespace n ON n.oid = c.relnamespace
   WHERE n.nspname = '<schema>' AND c.relkind = 'r';   -- 'd' (DEFAULT) or 'f' (FULL)

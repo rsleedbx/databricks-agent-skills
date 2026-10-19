@@ -79,6 +79,7 @@ flow_rows AS (
          coalesce(details:flow_progress.metrics.num_deleted_rows::bigint, 0) AS deleted
   FROM ev
   WHERE event_type = 'flow_progress'
+    AND origin.flow_name NOT LIKE '%\\_staging'                        -- per-table staging flows: timings only
     AND (origin.flow_name RLIKE '^([^.]+)\\.([^.]+)\\.(applier_)?\\1_\\2_.+$'
          OR (origin.flow_name RLIKE '^[^.]+\\.[^.]+\\.[^.]+$'                 -- no-cursor full-load flow
              AND origin.flow_name NOT LIKE 'pipelines.%'
