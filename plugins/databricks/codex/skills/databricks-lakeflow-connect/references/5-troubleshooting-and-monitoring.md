@@ -23,6 +23,28 @@ For event-log table conventions (filtering by `event_type`, joining with metrics
 
 **Gateway-based database pipelines have two event logs** — one for the gateway, one for the ingestion pipeline. A symptom on the ingestion side often has its root cause in the gateway side. When debugging database connectors, query both.
 
+### Each update can run on a different runtime
+
+Before comparing two updates that behaved differently, check what each ran on. Nothing in the pipeline has to change for the runtime to change between updates:
+
+- **The version can change.** Pipelines are versionless: Databricks upgrades the runtime on its own, and reverts a pipeline to the previous version if an upgrade stops it from starting ([pipeline release notes](https://docs.databricks.com/aws/en/release-notes/dlt/)). The `channel` setting (`CURRENT` or `PREVIEW`) picks which version line, not the exact version.
+- **The CPU architecture can change.** Serverless updates run on x86 or ARM depending on capacity, so on the same version one update can run on x86 and the next on ARM (`aarch64` in the image name; no suffix means x86). There is no pipeline setting for it. Cost per update can differ between the two: if DBU usage steps up or down at the same time as the architecture changes, show support the image names of the updates before and after, since they can pin a pipeline or workspace to one architecture.
+- **The settings can change.** Each update records the settings it ran with. Settings appear, disappear and change between runtime versions, and a setting you see in one update can be gone in a later one.
+
+Each update's `runtime_details` event shows the version, channel and image, and its `runtime_configuration` the settings:
+
+```sql
+SELECT timestamp, origin.update_id,
+  details:runtime_details.runtime_version.dbr_version AS dbr_version,
+  details:runtime_details.runtime_version.channel     AS channel,
+  details:runtime_details.runtime_version.image_key   AS image
+FROM event_log("<pipeline-id>")
+WHERE event_type = 'runtime_details'
+ORDER BY timestamp DESC;
+```
+
+When a problem appears in one update and not in another, put this next to the problem: a change of version or image between the two is the first thing to rule out, and the first thing support will ask about.
+
 ---
 
 ## Rows per table per run (snapshot inserts, upserts, deletes)
