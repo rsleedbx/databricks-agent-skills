@@ -568,6 +568,7 @@
         "references/arrow-flight.md",
         "references/authentication.md",
         "references/build-from-source.md",
+        "references/cdc-change-log.md",
         "references/choose-an-interface.md",
         "references/databricks-apps.md",
         "references/go-sdk.md",

@@ -135,7 +135,7 @@ But within each stream, the order is preserved.
 
 ## Delivery and duplicates
 
-**At-least-once delivery.** If a connection drops before an acknowledgment arrives, the SDK resends the unacknowledged records, so a few duplicate rows are possible. Most workloads accept that, so don't add deduplication by default, and never claim exactly-once. If the use case needs unique rows, keep the Zerobus table as the landing table and build a deduplicated table from it downstream with AUTO CDC in Lakeflow Spark Declarative Pipelines (see the `databricks-pipelines` skill).
+**At-least-once delivery.** If a connection drops before an acknowledgment arrives, the SDK resends the unacknowledged records, so a few duplicate rows are possible. Most workloads accept that, so don't add deduplication by default, and never claim exactly-once. If the use case needs unique rows, keep the Zerobus table as the landing table and build a deduplicated table from it downstream with AUTO CDC in Lakeflow Spark Declarative Pipelines (see the `databricks-pipelines` skill). For database changes, where a producer restart can resend many changes and history tables need them removed, see [cdc-change-log.md](cdc-change-log.md).
 
 For advanced custom recovery and fallback reprocessing, see [recovery.md](recovery.md).
 
