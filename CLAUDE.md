@@ -133,7 +133,7 @@ is additive and never replaces the entry here.
 
 ## Exporting skill changes from a sandbox
 
-When editing skills in a Claude Code sandbox (Omnigent, Solution Builder, etc.) that has no git push access, use a Databricks workspace as a file bridge. The sandbox CLI profile is typically pre-configured; check `databricks auth profiles`.
+When editing skills in a sandboxed agent environment (which has no git push access), use a Databricks workspace as a file bridge. The sandbox CLI profile is typically pre-configured; check `databricks auth profiles`.
 
 **Preferred: upload individual files (not a patch).** The workspace notebook format corrupts `git format-patch` output -- context lines shift, special characters get mangled, and `git apply` fails. Upload each changed file separately instead.
 
@@ -142,13 +142,13 @@ When editing skills in a Claude Code sandbox (Omnigent, Solution Builder, etc.) 
 ```bash
 cd databricks-agent-skills
 PROFILE="${OMNIGENT_WS:-DEFAULT}"
-WS_BASE="/Users/<email>/skill-files"
+WS_BASE="<workspace-home>/skill-files"   # <workspace-home> is your home folder in the workspace (e.g. /Users/user@domain.com)
 
 # Create workspace dirs matching the repo structure
 databricks workspace mkdirs "$WS_BASE/skills/<skill-name>/references" --profile $PROFILE
 
 # Upload each changed file
-for f in CLAUDE.md manifest.json skills/<skill-name>/SKILL.md skills/<skill-name>/references/*.md; do
+for f in CLAUDE.md metaplugin/plugin.meta.json manifest.json skills/<skill-name>/SKILL.md skills/<skill-name>/references/*.md; do
   databricks workspace import "$WS_BASE/$f" \
     --file "$f" --format SOURCE --language PYTHON \
     --profile $PROFILE --overwrite
@@ -162,10 +162,10 @@ cd databricks-agent-skills
 git checkout -b <branch>
 
 PROFILE="<omnigent-profile>"
-WS_BASE="/Users/<email>/skill-files"
+WS_BASE="<workspace-home>/skill-files"
 
 # Download every file the sandbox uploaded (the same set as its glob), stripping the notebook header
-files=(CLAUDE.md manifest.json skills/<skill-name>/SKILL.md)
+files=(CLAUDE.md metaplugin/plugin.meta.json manifest.json skills/<skill-name>/SKILL.md)
 for p in $(databricks workspace list "$WS_BASE/skills/<skill-name>/references" --profile "$PROFILE" -o json | yq -r '.[].path'); do
   files+=("${p#$WS_BASE/}")
 done

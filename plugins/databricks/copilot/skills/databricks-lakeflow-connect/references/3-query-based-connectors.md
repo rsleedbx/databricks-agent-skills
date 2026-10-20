@@ -97,9 +97,10 @@ The product accepts whatever you declare. A `primary_keys` value that isn't uniq
 
 | Check | How (from the introspection results, or one `remote_query` for all tables) | If it fails, tell the user |
 |---|---|---|
-| Declared key is a real primary key or unique constraint | The key columns match a `primary key` or `unique` row in the keys-and-indexes result | "`<cols>` isn't a primary key or unique constraint on `<table>`." Then check the data: `count(*)`, `count(DISTINCT <key>)`, and `count_if(<key> IS NULL)`. Duplicates or NULLs mean **silent data loss** under SCD1/SCD2. |
+| Declared key is a real primary key or unique constraint | The key columns match a `primary key` or `unique` row in the keys-and-indexes result | "`<cols>` isn't a primary key or unique constraint on `<table>`." Then check the data: `count(*)`, `count(DISTINCT <key>)`, and `SUM(CASE WHEN <key> IS NULL THEN 1 ELSE 0 END)`. Duplicates or NULLs mean **silent data loss** under SCD1/SCD2. |
 | Cursor column has an index | An `index`, `unique`, or `primary key` row whose first column is the cursor | "`<cursor>` has no index on `<table>`: every incremental run scans the whole table." |
-| Cursor has no NULLs | `count_if(<cursor> IS NULL)` | "N rows have a NULL cursor: the first snapshot loads them, but later changes to them are missed." |
+| Cursor has no NULLs | `SUM(CASE WHEN <cursor> IS NULL THEN 1 ELSE 0 END)` | "N rows have a NULL cursor: the first snapshot loads them, but later changes to them are missed." |
+| No duplicate keys | For multi-column key `<k1>, <k2>`: `SELECT COUNT(*) FROM (SELECT <k1>, <k2> FROM <table> GROUP BY <k1>, <k2> HAVING COUNT(*) > 1) d` returns 0 | "N rows have duplicate key values: the pipeline will overwrite them with silent data loss." |
 | Cursor moves on update | Postgres: an update trigger that sets it; MySQL: `on update` in `extra`; SQL Server: a trigger or the app sets it | "Updates won't be picked up unless `<cursor>` changes on every update." |
 | No key | No `primary key` / `unique` row | Offer `APPEND_ONLY` (needs a cursor), or SCD1 with no cursor (full load each run). SCD1/SCD2 with a cursor need a declared key. |
 

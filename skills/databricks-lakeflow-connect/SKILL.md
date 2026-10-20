@@ -107,12 +107,12 @@ No extra connector-specific SDK is needed. Lakeflow Connect reuses the pipelines
 
 ## Prerequisites
 
-**A bare demo request means Lakebase + query-based.** If the user asks for a Lakeflow Connect demo and gives no source, connector, or CDC mode, assume Lakebase as the Postgres source with query-based ingestion. Follow [6-lakebase-as-postgres-source.md](references/6-lakebase-as-postgres-source.md) and propose its Step 0 defaults (still confirm once before creating).
+**A bare demo request means Lakebase + query-based, confirmed once.** If the user asks for a Lakeflow Connect demo and gives no source, connector, or CDC mode, assume Lakebase as the Postgres source with query-based ingestion. Propose that once — "I'll set up a query-based ingestion from Lakebase to use as a Postgres connector demo" — and proceed when they confirm (or ask if they want a different source). Follow [6-lakebase-as-postgres-source.md](references/6-lakebase-as-postgres-source.md) and propose its Step 0 defaults. If the user names a source (a database or app) and asks for a demo, ask which database or app to ingest from instead of assuming.
 
 **Default names.** If the user doesn't name them, the pipeline, its target schema, its schedule job, and its bundle all get the same name, `<base>_<epoch>` (written `<name>` in the references), whether they're created in the UI, with a bundle, or through the REST API:
 
 - **`<base>`** is `<firstname><lastname>_<connection-name>`, lowercased, with every character other than letters and digits turned into `_` (Jane Doe with connection `my-pg-conn` → `janedoe_my_pg_conn`).
-- **First and last name:** `name.givenName` + `name.familyName` from `databricks current-user me`, letters and digits only (Jane Doe → `janedoe`). If those are empty, use the part of `userName` before `@`, without dots.
+- **First and last name:** `name.givenName` + `name.familyName` from `databricks current-user me`, ASCII letters and digits only (Jane Doe → `janedoe`; accents are dropped). If those are empty, use the part of `userName` before `@`, without dots.
 - **`<epoch>`** is the seconds since the epoch, taken once (`date +%s`) when the user says yes to the plan, and reused for every object of that setup: `janedoe_my_pg_conn_1792351234` for the pipeline, the schema, the job, and the bundle. Write it down (in the bundle's `variables`, or the shell) rather than calling `date` again, so a UI step done later still matches. A new setup gets a new epoch; still check the bundle and the Postgres slot names below before creating them, in case an epoch is reused.
 - **Standard (two-pipeline) CDC:** the gateway is `<base>_gw_<epoch>` and the ingestion pipeline (the applier) `<base>_ap_<epoch>`; the schema and job are `<base>_<epoch>`, with the same epoch.
 - **A connection you create** without a name from the user: `<firstname><lastname>-<engine>-<target>` (`janedoe-mysql-awsvm`), with no epoch: connections are shared by many pipelines.
@@ -251,7 +251,7 @@ query_based_connector_config: {cursor_columns: [updated_at]}
 
 ## Important
 
-- **Triggered only, no continuous mode** — pipelines run on a schedule or on-demand, never continuously. Check the connector reference for the latest status.
+- **Query-based and standard-CDC ingestion pipelines are triggered** — they run on a schedule or on-demand, never continuously. The standard-CDC gateway runs continuously from creation (stop it after a test: it bills and holds WAL). Integrated CDC has a continuous option; check its docs page for availability and behavior.
 - **Compute-only billing** — Lakeflow Connect is billed in DBUs (no per-row fee). Standard CDC adds an always-on gateway on top of the ingestion pipeline. Integrated CDC is one pipeline whose updates run until smart closure ends them, so they can run longer than a standard CDC ingestion run. See the [pricing page](https://www.databricks.com/product/pricing/lakeflow-connect) for current rates.
 - **Salesforce auth is OAuth U2M only** — no machine-to-machine, no basic auth. Connection creation requires a UI walk-through.
 - **Database staging retention is 30 days** by default for standard CDC, in the UC Volume between the gateway and the ingestion pipeline. Integrated CDC stages in the volume set by `data_staging_options`; check its docs page for retention.
