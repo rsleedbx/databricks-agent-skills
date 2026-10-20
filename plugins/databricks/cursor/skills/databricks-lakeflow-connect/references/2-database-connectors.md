@@ -62,7 +62,7 @@ A table with neither CDC nor change tracking can't be ingested with CDC: enable 
 
 ### Pipeline
 
-One pipeline per source. Create the destination schema and a staging schema first; the pipeline creates a staging volume in the staging schema, so it needs `CREATE VOLUME` there.
+One pipeline per source. Create the destination schema and a staging schema first; the pipeline creates a staging volume in the staging schema, so it needs `CREATE VOLUME` there. Without `data_staging_options`, it creates the volume in the destination schema instead, named `__databricks_ingestion_gateway_staging_data-<pipeline-id>` (tested on SQL Server, 2026-10); deleting that schema removes it.
 
 These fields are stable: `connection_name`, `connector_type: CDC`, `objects`, and `data_staging_options`. Set `channel` from the current docs page, as above. Leave `serverless` out and read back what the pipeline ran on ([Compute: serverless or classic](#compute-serverless-or-classic)).
 
@@ -136,6 +136,13 @@ Databricks sets and adjusts the minimum runtime, maximum runtime, and lag thresh
   ORDER BY timestamp DESC LIMIT 20
   ```
 
+- **The pipeline also starts updates itself.** After a source schema change, it starts one with cause `SCHEMA_CHANGE`; after a failure, often one with cause `RETRY_ON_FAILURE`. While that update runs, `start-update` is refused ("An active update ... already exists"). Before you start another update or a full refresh, check what's running and wait for it:
+
+  ```bash
+  databricks pipelines list-updates <pipeline-id> --max-results 3 -o json | yq '.updates[] | [.update_id, .cause, .state]'
+  ```
+
+  In tests (SQL Server, 2026-10), an update that failed right after an added column with `INGESTION_GATEWAY_INTERNAL_ERROR` and an empty "Extractor error:" was followed by the pipeline's own updates, and the column arrived without a full refresh. When it also reports `PIPELINE_NON_RETRYABLE_ANALYSIS_CLIENT_ERROR`, no retry follows: start the next update yourself.
 - **Schedule** it with a Jobs `pipeline_task`. Use the interval the smart closure page recommends (it currently suggests starting at 60 minutes). A trigger that fires while an update is still running is skipped. Continuous mode exists as a separate option; check its status in the docs.
 
 ### Behaviour that doesn't change between releases
@@ -217,6 +224,17 @@ SQL Server offers two source mechanisms; pick one per database.
 - Required when downstream needs per-event history (audit, SCD2 from raw deltas, etc.).
 
 Most pipelines start with CT and switch to CDC only when audit or SCD2 demands it.
+
+**`SCD_TYPE_2` needs CDC on the table, and pipeline create doesn't check it.** An `SCD_TYPE_2` table on change tracking is accepted. In a test (integrated CDC, 2026-10), its inserts didn't arrive until the next schema change on the table, and no error was reported. Before creating the pipeline, check each table you'll set to `SCD_TYPE_2` (on the source, or through the connection with `remote_query`, see [7-source-sql-through-connection.md](7-source-sql-through-connection.md)):
+
+```sql
+SELECT SCHEMA_NAME(t.schema_id) + '.' + t.name AS source_table, t.is_tracked_by_cdc,
+       CASE WHEN ct.object_id IS NULL THEN 0 ELSE 1 END AS is_change_tracked
+FROM sys.tables t LEFT JOIN sys.change_tracking_tables ct ON ct.object_id = t.object_id
+WHERE SCHEMA_NAME(t.schema_id) + '.' + t.name IN ('dbo.customers', 'dbo.orders');
+```
+
+`is_tracked_by_cdc = 1` is what `SCD_TYPE_2` needs. A table with only `is_change_tracked = 1` gets `SCD_TYPE_1`, or CDC enabled on it first (ask: it's a change to the customer's database).
 
 ---
 
