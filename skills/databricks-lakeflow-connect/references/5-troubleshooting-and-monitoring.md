@@ -61,11 +61,13 @@ flow_rows AS (
   --   query-based, no cursor (full load each run): <catalog>.<schema>.<table>; records no row counts
   --   query-based hard-delete tracking: <catalog>.<schema>.<catalog>_<schema>_<table>_delete (counted into <table>)
   -- Skips _staging, extractor_*, cdc_staging_table, and internal timing-only flows.
+  -- Note: if flow names use hyphens or backticks, the prefix pattern may not match and they show as "full load".
+  --       Inspect origin.flow_name in the raw event log to see the actual pattern, then adapt the regex.
   SELECT origin.update_id, origin.flow_name,
-         CASE WHEN origin.flow_name RLIKE '^([^.]+)\\.([^.]+)\\.(applier_)?\\1_\\2_.+_(snapshot|cdc)_flow$'
-              THEN regexp_extract(origin.flow_name, '^([^.]+)\\.([^.]+)\\.(applier_)?\\1_\\2_(.+)_(snapshot|cdc)_flow$', 4)
-              WHEN origin.flow_name RLIKE '^([^.]+)\\.([^.]+)\\.\\1_\\2_.+$'
-              THEN regexp_extract(origin.flow_name, '^([^.]+)\\.([^.]+)\\.\\1_\\2_(.+?)(_upsert|_delete)?$', 3)
+         CASE WHEN origin.flow_name RLIKE '.+_(snapshot|cdc)_flow$'
+              THEN regexp_extract(origin.flow_name, '^.+\\.([^_.]+)(?:_(?:snapshot|cdc)_flow)?(?:_upsert)?$', 1)
+              WHEN origin.flow_name RLIKE '.+_(?:upsert|delete)$'
+              THEN regexp_extract(origin.flow_name, '^.+\\.([^_.]+)(?:_upsert|_delete)?$', 1)
               ELSE regexp_extract(origin.flow_name, '([^.]+)$', 1) END AS tbl,
          origin.flow_name RLIKE '\\.applier_' AS is_integrated,
          CASE WHEN NOT origin.flow_name RLIKE '^([^.]+)\\.([^.]+)\\.(applier_)?\\1_\\2_.+$' THEN 'full load'

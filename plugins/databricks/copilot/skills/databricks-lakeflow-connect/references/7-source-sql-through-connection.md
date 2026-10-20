@@ -44,10 +44,10 @@ Use this when the user doesn't know their tables, or before generating DML. **Ne
 A foreign catalog (Lakehouse Federation) makes the source browsable in Catalog Explorer and queryable as `<catalog>.<schema>.<table>`. Offer it, don't just create it. Check permission first:
 
 ```bash
-MS=$(databricks metastores current --profile <PROFILE> -o json | jq -r .metastore_id)
+MS=$(databricks metastores current --profile <PROFILE> -o json | yq -r .metastore_id)
 databricks grants get-effective metastore $MS --principal <user> --profile <PROFILE> -o json \
-  | jq -r '[.privilege_assignments[]?.privileges[]?.privilege] | unique | join(",")'   # needs CREATE_CATALOG
-databricks connections get <connection> --profile <PROFILE> -o json | jq -r .owner     # owner, or CREATE_FOREIGN_CATALOG on it
+  | yq -r '[.privilege_assignments[].privileges[].privilege] | unique | join(",")'   # needs CREATE_CATALOG
+databricks connections get <connection> --profile <PROFILE> -o json | yq -r .owner     # owner, or CREATE_FOREIGN_CATALOG on it
 ```
 
 Without `CREATE_CATALOG` on the metastore, creation fails with "User does not have CREATE CATALOG on Metastore". Say so and use the `remote_query` introspection below instead; it needs nothing extra.
@@ -191,7 +191,7 @@ With the column and key lists, write change scripts that exercise a pipeline: fo
 Save as `source_sql.py` (the first line marks it as a Databricks notebook). It takes the connection type as a parameter, so look it up first:
 
 ```bash
-databricks connections get <connection> --profile <PROFILE> -o json | jq -r .connection_type   # POSTGRESQL | MYSQL | SQLSERVER
+databricks connections get <connection> --profile <PROFILE> -o json | yq -r .connection_type   # POSTGRESQL | MYSQL | SQLSERVER
 ```
 
 ```python
@@ -240,8 +240,10 @@ out = {"connection": conn, "type": conn_type, "database": database or None, "act
 if action in ("create_slot", "drop_slot"):
     if conn_type != "POSTGRESQL":
         raise ValueError(f"{action} is PostgreSQL only, connection type is {conn_type}")
-    if not slot_name.replace("_", "").isalnum() or slot_name.lower() != slot_name:
-        raise ValueError("slot_name must be lowercase letters, digits, and underscores")
+    if not database:
+        raise ValueError(f"{action} requires database to be set")
+    if not re.fullmatch(r"[a-z0-9_]+", slot_name):
+        raise ValueError("slot_name must be lowercase ASCII letters, digits, and underscores")
     slots = pg_slots()   # list once; each remote_query is a separate source session
     exists = any(s["slot_name"] == slot_name for s in slots)
     if action == "create_slot":
@@ -306,9 +308,9 @@ databricks jobs submit --json @submit.json --profile <PROFILE> -o json > run.jso
 No cluster spec means it runs on serverless. `jobs submit` waits for the run (about a minute including startup). Read each task's result from its **task** run ID, not the parent run ID:
 
 ```bash
-RID=$(jq -r .run_id run.json)
-databricks jobs get-run $RID --profile <PROFILE> -o json | jq -r '.tasks[] | [.task_key, .run_id, .state.result_state] | @tsv'
-databricks jobs get-run-output <task-run-id> --profile <PROFILE> -o json | jq -r '.notebook_output.result // .error'
+RID=$(yq -r .run_id run.json)
+databricks jobs get-run $RID --profile <PROFILE> -o json | yq -r '.tasks[] | "\(.task_key)\t\(.run_id)\t\(.state.result_state)"'
+databricks jobs get-run-output <task-run-id> --profile <PROFILE> -o json | yq -r '.notebook_output.result // .error'
 ```
 
 If a task fails, `jobs submit` exits non-zero and `run.json` can be empty: find the run with `databricks jobs list-runs --limit 5 -o json` by `run_name`.
@@ -320,15 +322,15 @@ If a task fails, `jobs submit` exits non-zero and `run.json` can be empty: find 
 An unused slot holds WAL on the source until someone drops it, so create it as late as possible:
 
 1. **Pick the names, one pair per pipeline:** slot `<slot_name>` and publication `<slot_name>_pub`, where `<slot_name>` is `<base>_<epoch>` of this pipeline pair (see **Default names** in SKILL.md: the pipelines are `<base>_gw_<epoch>` / `<base>_ap_<epoch>`). Take it from the pipelines, never from the destination schema: the user may name the schema, and several pipelines can share one. For example slot `janedoe_my_pg_conn_1792351234` and publication `janedoe_my_pg_conn_1792351234_pub`. Run `action: list` to make sure neither name is taken. Put both in the ingestion pipeline's `source_configurations` → `postgres.slot_config` (`slot_name`, `publication_name`); see [2-database-connectors.md](2-database-connectors.md#postgresql-cdc).
-2. **Create the pipelines first:** `bundle deploy`. This is where a workspace without Postgres CDC fails ("Ingestion source 'POSTGRESQL' is not supported in your workspace", 403). If it fails, stop: nothing exists on the source yet. If it succeeds, the gateway is a continuous pipeline and **starts on its own**; until the publication and slot exist it errors and retries. Stop it with `databricks pipelines stop <gateway-id>` while you do steps 3 and 4.
-3. **Publication (the user runs it):** give the user this statement, listing only this pipeline's tables, and wait for them to confirm. Then check it with `action: list`:
+2. **Publication (the user runs it), before anything else exists:** give the user this statement, listing only this pipeline's tables, and wait for them to confirm. Then check it with `action: list`:
 
    ```sql
    CREATE PUBLICATION <slot_name>_pub FOR TABLE <source_schema>.<table1>, <source_schema>.<table2>;
    ```
 
-4. **Slot (through the connection),** after the publication exists: `action: create_slot` with `slot_name: <slot_name>`. Then start the gateway (`databricks pipelines start-update <gateway-id>`) and run the ingestion pipeline.
-5. **Cleanup after the test** (ask first): `bundle destroy` (or delete the pipelines) so the gateway stops reading. Then run `action: drop_slot` with this pipeline's slot name, and give the user `DROP PUBLICATION <slot_name>_pub;` to run. Finish with `action: list` to confirm both are gone.
+3. **Create the pipelines:** `bundle deploy`. This is where a workspace without Postgres CDC fails ("Ingestion source 'POSTGRESQL' is not supported in your workspace", 403). If it fails, give the user `DROP PUBLICATION <slot_name>_pub;` and stop. If it succeeds, the gateway is a continuous pipeline and **starts on its own**, and errors until the slot exists: stop it with `databricks pipelines stop <gateway-id>`.
+4. **Slot (through the connection):** `action: create_slot` with `slot_name: <slot_name>` and `database: <database>` (the database the publication is in; a slot belongs to one database). Then start the gateway (`databricks pipelines start-update <gateway-id>`) and run the ingestion pipeline.
+5. **Cleanup after the test** (ask first): `bundle destroy` (or delete the pipelines) so the gateway stops reading. Then run `action: drop_slot` with this pipeline's slot name and database, and give the user `DROP PUBLICATION <slot_name>_pub;` to run. Finish with `action: list` to confirm both are gone.
 
 If anything fails after the slot exists, drop the slot before you stop, or tell the user it's there and why it matters: a slot nobody reads keeps holding WAL and can fill the source disk, especially when `max_slot_wal_keep_size` is `-1`.
 

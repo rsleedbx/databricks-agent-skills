@@ -1,6 +1,6 @@
 # Database connectors
 
-SQL Server (cloud and on-prem) is the GA database connector, as standard or integrated CDC. Postgres CDC is Public Preview and covered below. Release stages change often: check the [connector reference](https://docs.databricks.com/ingestion/lakeflow-connect/) for current status. MySQL CDC and Foreign Catalog connectors are Public Preview and covered briefly; see the [connector reference](https://docs.databricks.com/ingestion/lakeflow-connect/) for their setup.
+SQL Server (cloud and on-prem) is the GA database connector, as standard or integrated CDC. Postgres CDC is Public Preview and covered below. Release stages change often: check the [connector reference](https://docs.databricks.com/ingestion/lakeflow-connect/) for current status. MySQL CDC defaults to integrated CDC (covered above) and is available on request as standard CDC; see the [connector reference](https://docs.databricks.com/ingestion/lakeflow-connect/) for current setup.
 
 **Query-based connectors don't use a gateway** — they're a single serverless pipeline. See [3-query-based-connectors.md](3-query-based-connectors.md).
 
@@ -30,7 +30,7 @@ There are two ways to run a database CDC connector:
 
 From the page, check: release stage, whether it needs `channel: PREVIEW`, whether it supports serverless, classic, or both (to know what the default may pick; still leave `serverless` unset, see [Compute: serverless or classic](#compute-serverless-or-classic)), and the source prerequisites. If a source now has an integrated CDC page that isn't listed here, use it. If the docs can't be fetched, say so and follow the table above as written. For a source marked "none yet", don't try integrated CDC: offer standard CDC. Don't add settings the table doesn't list (for example, only set `channel: PREVIEW` where the table or docs page requires it). Then let the workspace correct you.
 
-**The workspace's error wins over the docs and this skill.** For example, a workspace that enforces serverless rejects classic compute (a `serverless` left unset that defaults to classic, or `serverless: false`) with "You must use serverless compute in this workspace". Set `serverless: true` and retry. If it rejects `connector_type: CDC`, integrated CDC isn't enabled on that workspace (the Databricks account team turns it on): tell the user rather than falling back to standard CDC.
+**The workspace's error wins over the docs and this skill.** For example, a workspace that enforces serverless rejects classic compute (a `serverless` left unset that defaults to classic, or `serverless: false`) with "You must use serverless compute in this workspace". Set `serverless: true` and retry. If it rejects `connector_type: CDC`, integrated CDC isn't enabled on that workspace (the Databricks account team turns it on): tell the user integrated CDC isn't available, and offer standard CDC where the source has it (never switch silently: the gateway costs more and runs continuously).
 
 ### Source prerequisites
 
@@ -97,7 +97,6 @@ For MySQL, address tables by `source_schema: <mysql-database>` with no `source_c
 ```yaml
     mysql_cdc:
       name: <name>
-      channel: PREVIEW                 # while the MySQL page says it's required
       catalog: ${var.catalog}
       schema: <name>
       ingestion_definition:
@@ -240,8 +239,8 @@ resources:
       gateway_definition:
         connection_name: my_sqlserver_connection
         gateway_storage_catalog: ${var.catalog}
-        gateway_storage_schema: ingestion_staging
-        gateway_storage_name: sqlserver_gateway_storage
+        gateway_storage_schema: <base>_<epoch>_stg
+        gateway_storage_name: <base>_gw_<epoch>
 
     sqlserver_ingestion:
       name: <base>_ap_<epoch>          # the same epoch as the gateway
@@ -274,7 +273,7 @@ The gateway compute itself runs on Databricks-managed VPC infrastructure inside 
 
 ## Workspace feature gates (all database sources)
 
-Each standard CDC source is enabled per workspace. When it isn't, the gateway create fails with `Ingestion source '<SOURCE>' is not supported in your workspace. Please contact Databricks support to enable this feature for your workspace. (403 PERMISSION_DENIED)`. This has been seen for `POSTGRESQL` and `MYSQL` on a workspace where query-based and integrated CDC for the same sources worked, and for `ORACLE` (integrated CDC) and `POSTGRESQL` (gateway) on a workspace where query-based ingestion from both worked. Report it, don't work around it, and offer the modes that weren't refused: for a refused gateway (standard CDC), integrated CDC or query-based; for a refused integrated CDC source, standard CDC where the source has it, else query-based (Oracle has no standard mode, so query-based). A failed `bundle deploy` can still have created the schemas declared before the pipelines: offer `bundle destroy` so nothing is left behind.
+Each standard CDC source and integrated CDC source is enabled per workspace. When it isn't, the pipeline (or gateway) create fails with `Ingestion source '<SOURCE>' is not supported in your workspace. Please contact Databricks support to enable this feature for your workspace. (403 PERMISSION_DENIED)`. This has been seen for `POSTGRESQL` and `MYSQL` (standard / gateway) on a workspace where query-based and integrated CDC for the same sources worked, and for `ORACLE` and `POSTGRESQL` (integrated CDC) on a workspace where query-based ingestion from both worked. Report it, don't work around it, and offer the modes that weren't refused: for a refused gateway (standard CDC), integrated CDC or query-based; for a refused integrated CDC source, standard CDC where the source has it, else query-based (Oracle has no standard mode, so query-based). A failed `bundle deploy` can still have created the schemas declared before the pipelines: offer `bundle destroy` so nothing is left behind.
 
 ---
 
@@ -358,7 +357,7 @@ SELECT pg_create_logical_replication_slot('<slot_name>', 'pgoutput');
 Server parameters:
 
 - `max_slot_wal_keep_size` — set a finite value. `-1` lets a stalled slot keep WAL forever and fill the disk.
-- `max_replication_slots` / `max_wal_senders` — at least one per replicated database on top of existing use.
+- `max_replication_slots` / `max_wal_senders` — each pipeline pair gets one slot. Set these to the total number of pipeline pairs on top of existing use (one per pair, plus headroom).
 
 ### Pipelines
 
@@ -372,8 +371,8 @@ resources:
       gateway_definition:
         connection_name: my_pg_connection
         gateway_storage_catalog: ${var.catalog}
-        gateway_storage_schema: ingestion_staging
-        gateway_storage_name: pg_gateway_storage
+        gateway_storage_schema: <base>_<epoch>_stg
+        gateway_storage_name: <base>_gw_<epoch>
 
     pg_ingestion:
       name: <base>_ap_<epoch>
@@ -432,6 +431,6 @@ Using Lakebase as the Postgres source for a demo: see [6-lakebase-as-postgres-so
 
 Use the [connector reference](https://docs.databricks.com/ingestion/lakeflow-connect/) for current setup steps:
 
-- **MySQL CDC** — same gateway pattern; binlog replaces CT/CDC.
+- **MySQL CDC** — integrated CDC (default) or standard gateway pattern on request; binlog replaces CT/CDC.
 - **Oracle / Teradata / SQL Server / Postgres / MySQL / MariaDB query-based** — no gateway; see [3-query-based-connectors.md](3-query-based-connectors.md).
 - **Snowflake / Redshift / Synapse / BigQuery (Foreign Catalog)** — Lakeflow Connect creates the foreign catalog and materializes the queried subset to Delta. Most useful for warehouse-to-lakehouse migration scenarios.
