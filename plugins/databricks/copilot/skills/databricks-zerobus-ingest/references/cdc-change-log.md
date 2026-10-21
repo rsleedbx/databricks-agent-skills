@@ -66,7 +66,7 @@ CREATE FLOW orders_history_from_changes AS AUTO CDC INTO orders_history FROM STR
 
 - **Take the key columns from `key`**, not `after`: a delete has no `after`.
 - **Snapshot columns are cast to the silver type.** Check decimals in the snapshot files: one export tool wrote a DECIMAL column as text bytes under a DECIMAL annotation, which every reader decoded wrongly. Exporting such columns as strings and casting them in the snapshot view fixed it.
-- **Build the column list from the source's catalog**, not by hand. A Unity Catalog connection with `remote_query` reads `information_schema.columns` and the primary key in one query, and the pipeline file is generated from that.
+- **Build the column list from the source's catalog**, not by hand. When serverless can reach the database, a Unity Catalog connection with `remote_query` reads `information_schema.columns` and the primary key in one query, and the pipeline file is generated from that. When it can't, put the schema in the Volume ([below](#without-object-storage-permissions)).
 
 The deduplicated change log, in a Python file in the same pipeline. A replay has the same key and the same row image as the original, so match on both, within a watermark on the event time:
 
@@ -92,6 +92,49 @@ Size the watermark to how long a producer restart takes. A real change that repe
 ## Gold
 
 A materialized view over silver, for example each customer with the count and total of their orders, `CLUSTER BY` what readers filter on. It refreshes **incrementally**: the first update is a complete recompute, and later ones use `GROUP_AGGREGATE`. That works because AUTO CDC targets have row tracking and change data feed on. To see how a refresh ran, query `event_log('<pipeline id>')` for `event_type = 'planning_information'`. The pipeline events API returns those events without their details.
+
+## Without object storage permissions
+
+Many users can't create cloud object storage, or the Databricks storage credential and external location that reach it. Neither is needed here:
+
+- **The snapshot and the schema go into a managed Volume** with `databricks fs cp -r <local dir> dbfs:/Volumes/<catalog>/<schema>/<volume>`. A managed Volume lives in the catalog's own storage, so creating one needs only `CREATE VOLUME` on a schema you own or can create objects in. Dump the snapshot where the database runs, a laptop included, then copy it up.
+- **The change log still goes through Zerobus**, which needs a service principal with an OAuth secret: Zerobus has no user-token authentication. Without permission to create one, ask someone who has it to create it once and give you its application ID and secret. As the owner of the change-log table, you grant it `SELECT` and `MODIFY`.
+
+**Keep the schema in the Volume too, and let the pipeline build itself from it.** Write the source's tables, columns, types and primary keys to a file, for example `<volume>/_schema/schema.yaml`, with a copy as of T for the snapshot's columns. Then make silver a Python pipeline file that reads it when the pipeline starts and defines every view, table and flow in a loop:
+
+```python
+import yaml
+from pyspark import pipelines as dp
+from pyspark.sql import functions as F
+
+VOL = spark.conf.get("cdc.volume")          # pipeline configuration
+with open(f"{VOL}/_schema/schema.yaml") as f:  # tables: [{name, columns: [{name, type, precision, scale, primary_key}]}]
+    SCHEMA = {t["name"]: t["columns"] for t in yaml.safe_load(f)["tables"]}
+
+def sql_type(c):
+    if c["type"] == "decimal":
+        return f"DECIMAL({c['precision']},{c['scale']})"
+    return {"integer": "INT", "long": "BIGINT", "double": "DOUBLE", "boolean": "BOOLEAN", "date": "DATE",
+            "timestamp": "TIMESTAMP_NTZ", "timestamptz": "TIMESTAMP"}.get(c["type"], "STRING")
+
+def define(table, cols):
+    keys = [c["name"] for c in cols if c.get("primary_key")]
+    dp.temporary_view(name=f"{table}_changes")(lambda: spark.readStream.table("cdc_log")
+        .where(F.col("destination") == f"<prefix>.{table}")
+        .select(*[F.expr(f"{'key' if c['name'] in keys else 'value:after'}:{c['name']}::{sql_type(c)}").alias(c["name"])
+                  for c in cols],
+                F.expr("value:ts_ns::BIGINT").alias("_seq"), F.col("operation").alias("_op")))
+    dp.create_streaming_table(name=table, cluster_by=keys)
+    dp.create_auto_cdc_flow(name=f"{table}_from_changes", target=table, source=f"{table}_changes", keys=keys,
+                            sequence_by="_seq", apply_as_deletes=F.expr("_op = 'delete'"),
+                            except_column_list=["_seq", "_op"], stored_as_scd_type=1)
+    # ... the snapshot view and its flow, and the SCD type 2 target, the same way
+
+for name, columns in SCHEMA.items():
+    define(name, columns)
+```
+
+Then a schema change needs no code change: upload the new schema file, full-refresh the changed tables, and run a plain update. Tested end to end with the source and the producer on a laptop, the snapshot and schema in a managed Volume, and the change log through Zerobus. The results matched the setup with a reachable database and a Unity Catalog connection.
 
 ## When the source's schema changes
 
