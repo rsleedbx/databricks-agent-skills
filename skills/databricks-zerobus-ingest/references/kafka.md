@@ -2,7 +2,7 @@
 
 Read this when the user already runs a **Kafka producer** (an app, agent, or collector that emits to Kafka) and wants that data in a Delta table with minimal code changes. Zerobus **supports Apache Kafka-compatible producer APIs**. It isn't a Kafka broker: the APIs are **write-only**. Content comes from the Zerobus Kafka docs, so you don't need to fetch them. For migrating a whole pipeline from Kafka or a Kafka-compatible system, also read [migration-from-kafka-compatible-systems.md](migration-from-kafka-compatible-systems.md).
 
-**Status:** Beta.
+**Status:** Beta. A workspace admin must turn on **Zerobus Ingest Kafka Endpoint** on the workspace **Previews** page. Until then, every connection fails SASL authentication with "Access denied: feature \"Zerobus Ingest Kafka Endpoint\" is not enabled for workspace" (error 4062), even with a valid token and grants.
 
 ## When to use it
 | Use the Kafka-compatible APIs | Use an SDK or keep Kafka |
@@ -100,6 +100,7 @@ producer.close()
 | Error | Cause | Fix |
 |-------|-------|-----|
 | `SASL_AUTHENTICATION_FAILED` | Bad token or missing grants | Check callback (resource, `authorization_details`), grants |
+| `SaslAuthenticationException` "feature \"Zerobus Ingest Kafka Endpoint\" is not enabled" (error 4062) | The Kafka endpoint preview is off for the workspace | A workspace admin enables it on the Previews page |
 | `UNKNOWN_TOPIC_OR_PARTITION` | Table doesn't exist or token unauthorized | Create table, check table name and grants |
 | `INVALID_RECORD` | Schema mismatch or not UTF-8 JSON | Match schema or add rescue column ([schema-management.md](schema-management.md)) |
 | `MESSAGE_TOO_LARGE` | Record > 10 MB | Split record |
