@@ -60,7 +60,7 @@ Full coverage in this skill, except rows whose Reference is a public docs page.
 
 | Source | Type | Auth | Reference |
 |--------|------|------|-----------|
-| Salesforce (Sales / Service / etc.) | SaaS pull | OAuth U2M | [1-saas-connectors.md](references/1-saas-connectors.md) |
+| Salesforce (Sales / Service / etc.) | SaaS pull | OAuth U2M / mTLS | [1-saas-connectors.md](references/1-saas-connectors.md) |
 | Workday Reports (RaaS) | SaaS pull | OAuth refresh token / basic | [1-saas-connectors.md](references/1-saas-connectors.md) |
 | ServiceNow | SaaS pull | OAuth U2M / basic | [1-saas-connectors.md](references/1-saas-connectors.md) |
 | Google Analytics 4 | SaaS pull (via BigQuery) | Service-account JSON | [1-saas-connectors.md](references/1-saas-connectors.md) |
@@ -85,7 +85,13 @@ Production-supported. Configuration may evolve before GA. Deep coverage is being
 
 ### Beta and Private Preview
 
-Early-access connectors are not production-supported. The list changes month to month; check the [public connector reference](https://docs.databricks.com/ingestion/lakeflow-connect/) for current availability.
+Early-access connectors are not production-supported. The list changes month to month; check the [public connector reference](https://docs.databricks.com/ingestion/lakeflow-connect/) for current availability: each connector's pipeline page states its status under the title. Covered here:
+
+| Source | Type | Auth | Reference |
+|--------|------|------|-----------|
+| Workday HCM | SaaS pull | OAuth refresh token | [1-saas-connectors.md](references/1-saas-connectors.md) |
+| Google Ads | SaaS pull | OAuth | [1-saas-connectors.md](references/1-saas-connectors.md) |
+| Meta Ads | SaaS pull | OAuth | [1-saas-connectors.md](references/1-saas-connectors.md) |
 
 For the Lakeflow-Connect-vs-Auto-Loader-vs-Federation-vs-Delta-Sharing decision, see [4-ingestion-decision-tree.md](references/4-ingestion-decision-tree.md).
 

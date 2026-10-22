@@ -1,6 +1,6 @@
 # SaaS connectors
 
-The six GA SaaS connectors (Salesforce, Workday Reports, ServiceNow, Google Analytics 4, HubSpot, Confluence) all share the same authoring pattern. This reference covers the unified flow once, then captures per-connector deltas.
+Every SaaS connector shares the same authoring pattern. This reference covers the unified flow once, then captures per-connector deltas for the most used ones. Each connector's pipeline page (`https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/<connector>-pipeline`) states its release status under the title, and most publish a ready-to-run pipeline notebook: use the page's **Open in Databricks** button, fill in the connection and objects, and run it.
 
 ---
 
@@ -39,9 +39,9 @@ Keys to know:
 
 ## Salesforce
 
-- **Auth**: OAuth U2M only. No machine-to-machine, no basic auth, no API key. The connection must be created in Catalog Explorer with a browser-based login.
+- **Auth**: OAuth (browser-based, created in Catalog Explorer) or mutual TLS (mTLS). If Salesforce rotates or revokes the refresh token, update the connection by hand. The **Is sandbox** option doesn't apply to mTLS connections. See [Salesforce limitations](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/salesforce-limits).
 - **Limit**: 250 tables per pipeline. Split larger workloads into multiple pipelines partitioned by object family.
-- **Formula fields**: ingested as full snapshots only — incremental CDC is not available for computed columns. Plan for higher DBU usage on objects with many formula fields.
+- **Formula fields**: fully re-read on every update by default, because Salesforce doesn't move the cursor column when a formula's value changes, so each update writes as many rows as the object has. Turn on [incremental formula field ingestion](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/salesforce-formula-fields) to avoid it, within its documented limits.
 - **Data-type changes**: source data-type changes are not auto-handled. A reload from snapshot is required when the source column type changes.
 - **Sandboxes**: a separate UC connection per sandbox vs production org. Don't reuse connections across orgs.
 
@@ -55,6 +55,21 @@ The Workday connector is **Report-as-a-Service** — it ingests Workday custom r
 - **Source objects**: each "table" is a Workday custom report. Configure the report in Workday first, then reference it by name in the pipeline.
 - **Limits**: same 250-table-per-pipeline cap; per-report row limits inherit from the Workday report itself.
 - **No auto data-type evolution**: report schema changes require a pipeline edit + reload.
+
+---
+
+## Workday HCM (Beta)
+
+Raw Workday HCM objects, unlike Workday Reports.
+
+- **Source objects**: `source_schema` is `default`, and each `source_table` is an HCM object such as `workers`.
+- **No column selection**: the whole object is ingested.
+- Setup: [configure authentication to Workday HCM](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/workday-hcm-setup), then [create the pipeline](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/workday-hcm-pipeline). Objects: [Workday HCM reference](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/workday-hcm-reference).
+
+```json
+{"table": {"source_schema": "default", "source_table": "workers",
+           "destination_catalog": "main", "destination_schema": "workday_hcm"}}
+```
 
 ---
 
@@ -91,6 +106,36 @@ GA4 ingestion goes **via BigQuery** — Lakeflow Connect reads from the GA4 BigQ
 - **Auth**: OAuth U2M.
 - **Source objects**: spaces, pages, comments. Markup is preserved in the page body column.
 - **Status caveat**: same as HubSpot — confirm regional availability in the connector reference.
+
+---
+
+## Google Ads (Beta)
+
+- **Source objects**: `source_schema` is the Google Ads customer account ID. Ingest the whole account with an `objects[].schema` block, or pick tables.
+- **Options**, under `connector_options.google_ads_options` on the schema or the table:
+  - `sync_start_date`: how far back the first load of report tables goes. By default, two years; there is no maximum.
+  - `lookback_window_days`: how many recent days each update re-reads. By default, 30. Google Ads conversion data can change for up to 90 days, so match it to your conversion attribution window (for example, `60` for a 60-day window).
+  - `manager_account_id`: for accounts under a manager (MCC) account. Not supported in bundles; set it from a notebook.
+- **Incremental only for report tables**: resource tables (campaigns, ad groups, ads) and event tables are fully refreshed on every update, and resource tables don't support SCD type 2.
+- See [Google Ads concepts](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/google-ads-concepts) and the [reference](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/google-ads-reference).
+
+```json
+{"schema": {"source_schema": "<customer-account-id>",
+            "destination_catalog": "main", "destination_schema": "google_ads",
+            "connector_options": {"google_ads_options": {"lookback_window_days": 60}}}}
+```
+
+---
+
+## Meta Ads (Beta)
+
+- **Beta limits**: no UI: create pipelines with the CLI, APIs, SDKs or bundles. Facebook Ads only, not Instagram Ads. If the token expires or is revoked, reauthorize the connection.
+- **Source objects**: `source_schema` is the Meta Ads account ID.
+- **`ad_insights` needs options**, under `connector_options.meta_ads_options` on the table or schema:
+  - `level`: `account`, `campaign`, `adset` or `ad`. By default, `ad`.
+  - `start_date`: `YYYY-MM-DD`, within the last 36 months. By default, 36 months back.
+  - `breakdowns` and `action_breakdowns`: lists of breakdown dimensions, such as `["age", "gender", "country"]`.
+- See [create a Meta Ads pipeline](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/meta-ads-pipeline) and [Meta Ads limitations](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/meta-ads-limits).
 
 ---
 
