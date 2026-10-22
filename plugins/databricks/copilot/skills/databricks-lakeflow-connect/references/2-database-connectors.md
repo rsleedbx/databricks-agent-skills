@@ -156,6 +156,12 @@ Report rows per table per run with the query in [5-troubleshooting-and-monitorin
 
 ---
 
+**Also tested (2026-10):**
+- **One table that stops doesn't stop the others,** but the update ends `FAILED` with `PIPELINE_NON_RETRYABLE_ANALYSIS_CLIENT_ERROR` ("… A new pipeline update will not be created") until that table is fixed or full-refreshed. Alert on the update's state, and read the table's error in the event log.
+- **A pipeline can't switch between integrated CDC and a gateway:** `pipelines update` refuses it both ways, a second pipeline can't write to the first one's tables (`TABLE_ALREADY_MANAGED_BY_OTHER_PIPELINE`), and deleting a pipeline deletes its destination tables. Moving means a new pipeline and a full load.
+- **Change data feed is on for destination tables,** readable with `table_changes()` from version 1 (version 0 has no change data: `DELTA_MISSING_CHANGE_DATA`). On an SCD type 2 table a delete shows as a closed row, not a `delete` change.
+- **Many tables per pipeline:** 900 tables (SQL Server, one schema object per source schema) were accepted and loaded with no reinitialization timeout, though the recommendation is 250 or fewer; load time and change latency grow with the count, so split large table counts across pipelines.
+
 ## The gateway pattern
 
 Standard CDC splits into two pipelines (the compute options for each change between releases; check the connector's docs page):
@@ -234,7 +240,21 @@ FROM sys.tables t LEFT JOIN sys.change_tracking_tables ct ON ct.object_id = t.ob
 WHERE SCHEMA_NAME(t.schema_id) + '.' + t.name IN ('dbo.customers', 'dbo.orders');
 ```
 
-`is_tracked_by_cdc = 1` is what `SCD_TYPE_2` needs. A table with only `is_change_tracked = 1` gets `SCD_TYPE_1`, or CDC enabled on it first (ask: it's a change to the customer's database).
+`is_tracked_by_cdc = 1` is what `SCD_TYPE_2` needs. A table with only `is_change_tracked = 1` gets `SCD_TYPE_1`, or CDC enabled on it first (ask: it's a change to the customer's database). If a change-tracking table must stay on `SCD_TYPE_2`, the connection's login needs `VIEW SERVER STATE` (`GRANT VIEW SERVER STATE TO <login>;` in `master`): the change-tracking path reads each change's commit time from `sys.dm_tran_commit_table`, which shows a login without it no rows, and that is what holds the changes. The utility objects don't grant it.
+
+**Source table changes (tested, 2026-10):**
+
+| On the source | What the pipeline does | What to do |
+|---|---|---|
+| `DELETE` every row, then `INSERT` | Applied like any other change | Nothing |
+| `TRUNCATE` on a CDC table | SQL Server refuses it (Msg 4711). CDC off, `TRUNCATE`, CDC on (`lakeflowSetupChangeDataCapture`): the table stops with `INGESTION_GATEWAY_CDC_LOG_TRUNCATED` | Full refresh of the table, or `auto_full_refresh_policy` on it |
+| `TRUNCATE` on a change-tracking table | **No error; the destination keeps the truncated rows** | Full refresh of the table after every `TRUNCATE` (the policy can't react: nothing fails). Prefer `DELETE` on change-tracking tables |
+| Drop and recreate a change-tracking table | **No error; the destination keeps the old rows** | Full refresh of the table |
+| Drop and recreate a CDC table | `INGESTION_GATEWAY_CDC_LOG_TRUNCATED`; a full refresh then reports success but keeps the old rows, and the next update fails with `MANAGED_INGESTION_CANNOT_CHANGE_SOURCE_FOR_EXISTING_DESTINATION_TABLE` | Map the recreated table to a new `destination_table` |
+| Primary key change or column rename on a CDC table | SQL Server refuses it while CDC captures the table (Msg 22979, 4928). CDC off, change, CDC on: `INGESTION_GATEWAY_CDC_LOG_TRUNCATED` | Full refresh, or the policy |
+| Column rename on a change-tracking table | `CDC_INCOMPATIBLE_SCHEMA_CHANGES.COLUMNS_ADDED_AND_DELETED` | Full refresh, or the policy |
+| Widen or narrow a column type, `DROP COLUMN` | Applied; the destination keeps the old type and the dropped column | Nothing (full refresh to take the new type) |
+| Add a table to the ingestion definition | The new table gets its own snapshot; the others aren't reset | Nothing |
 
 ---
 
@@ -440,6 +460,9 @@ SELECT c.relname, c.relreplident FROM pg_class c
 | Table not replicating | Not in the publication | `ALTER PUBLICATION <slot_name>_pub ADD TABLE <schema>.<table>;` |
 | Gateway create fails: "Ingestion source 'POSTGRESQL' is not supported in your workspace" (403) | Postgres CDC isn't enabled on this workspace (query-based Postgres can still work) | Ask the Databricks account team or support to enable it. Don't work around it. If you already created a slot, drop it. The deploy may have created the destination and staging schemas before failing: offer `bundle destroy` to remove them. |
 | Slot creation fails | Wrong role, or `wal_level` not `logical` | Create the slot as the `REPLICATION` role, after the publication, with `pgoutput`. |
+| Gateway: `INGESTION_GATEWAY_CONNECTION_ERROR.SOURCE_AUTHENTICATION_FAILURE` "… The server does not support SSL" | The gateway requires SSL; `remote_query` through the same connection works without it | Turn on `ssl` on the source. With a self-signed certificate, add `"trustServerCertificate": "true"` to the connection's options |
+| A table stops with `INGESTION_GATEWAY_DDL_NOT_SUPPORTED.UNSUPPORTED_DDL` after `ADD COLUMN` (nullable or not), `DROP COLUMN` or `RENAME COLUMN` | By default, Postgres column changes aren't applied in place | Full refresh of the table, or `auto_full_refresh_policy` on it. Type changes and a `TRUNCATE` (`…TRUNCATE_TABLE`, also covered by the policy) are handled; the destination keeps a column's old type |
+| `INGESTION_GATEWAY_CDC_NOT_ENABLED`: "has a TOAST-able type column, and needs FULL REPLICA IDENTITY" | A table with an unbounded TOAST-able column (`TEXT` and alike) under `REPLICA IDENTITY DEFAULT`, including after adding such a column or switching a table to `DEFAULT` or `NOTHING` (it fails at the next changes, not at the DDL) | `ALTER TABLE … REPLICA IDENTITY FULL`, then a full refresh of the table. Bounded types (`VARCHAR(n)`) are fine under `DEFAULT` |
 
 Using Lakebase as the Postgres source for a demo: see [6-lakebase-as-postgres-source.md](6-lakebase-as-postgres-source.md). For CDC on Lakebase, try creating the publication first: if Lakebase refuses it ("CREATE PUBLICATION is not enabled on this Lakebase instance"), CDC can't run there yet, so use query-based.
 
