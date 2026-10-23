@@ -115,6 +115,25 @@ For MySQL, address tables by `source_schema: <mysql-database>` with no `source_c
 
 **Clean up** an integrated CDC pipeline in this order: delete the pipeline (`databricks bundle destroy`, or `databricks pipelines delete <pipeline-id>`), then both schemas, which also removes the staging volume: `databricks schemas delete <catalog>.<name> --force` and `databricks schemas delete <catalog>.<name>_staging --force`. The bundle doesn't own schemas you created by hand, so `bundle destroy` leaves them.
 
+### Where each table lands: what LFC names, what you choose
+
+LFC names the destination tables; you choose where they go. That split decides what a user has to write in `objects`:
+
+| | LFC does it | You specify |
+|---|---|---|
+| Destination table name | the source table's name (`lfcdb.orders` -> `orders`) | `destination_table`, only to rename |
+| Destination catalog and schema | | `destination_catalog` and `destination_schema` on every object |
+| Which tables (schema object) | every table in the source schema, under its own name, and tables added to it later | nothing per table; a schema object can't rename one |
+| Two source tables with the same name (`sales.orders`, `finance.orders`) | nothing: it doesn't rename a clash | a different `destination_schema` for each (or two schema objects, one per source schema), or a `destination_table` for one |
+| Staging volume | created in the staging (or destination) schema | `data_staging_options`, to choose the schema |
+
+Two same-name tables in one pipeline work, each to its own destination schema or name (tested 2026-10 on SQL Server: two destination schemas, two schema objects, and a rename in one schema; both CDC modes; change tracking and CDC). Each destination kept only its own source's rows and changes. The SQL Server and PostgreSQL limits pages still say two same-name tables can't share a pipeline; the [MySQL limits page](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/mysql-limits) has the rule that held: not to the **same** destination schema.
+
+Pipeline create doesn't check the mapping, so check it before deploying:
+
+- **Two sources to one destination table:** the create succeeds, then the first update fails with `CDC_MULTIPLE_SOURCE_TABLES_MAPPED_TO_SAME_DESTINATION_TABLE`, naming both source tables. Nothing loads.
+- **Two destination names that are equal once `.` becomes `_`** (`bronze_raw.orders` and `bronze.raw_orders`): every update fails with `FLOW_DEFINED_IN_MULTIPLE_DATASETS` and the pipeline retries on its own. Rename one.
+
 ### How an update runs: smart closure
 
 Integrated CDC updates are triggered, but they don't stop as soon as the backlog is empty. [Smart closure](https://docs.databricks.com/aws/en/ingestion/lakeflow-connect/smart-closure) decides when an update ends:
