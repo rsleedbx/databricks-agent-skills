@@ -110,13 +110,13 @@ Not production-supported; check the [connector reference](https://docs.databrick
 
 ---
 
-## Authoring and running a pipeline
+## Running the pipeline
 
 Minimal JSON for `databricks pipelines create`, a DAB-authored version, and how to run and poll an update: [authoring-and-running.md](references/authoring-and-running.md).
 
 ---
 
-## Reference index
+## Detailed guides
 
 | File | When to read |
 |------|--------------|
@@ -188,7 +188,7 @@ Four forms that look plausible but fail. The wrong and right JSON and SQL: [anti
 - **Streaming Delta output** — destination tables are governed Delta tables; CDC sources apply with change semantics (`APPLY CHANGES` / AUTO CDC, or `apply_changes_from_snapshot` for snapshot sources).
 - **OAuth U2M is UI-only** — DAB / CLI cannot bootstrap it. Hand the browser step to a human (Catalog Explorer > External Data > Connections > Create connection > pick the source > sign in), then resume once `databricks connections get <connection_name>` reports `READY`.
 
-## Read every error and warning, then recover and continue
+## Common Issues
 
 The workspace's own message is usually more current than the docs or this skill. After every create, deploy, and update:
 
@@ -200,8 +200,6 @@ The workspace's own message is usually more current than the docs or this skill.
    - **A source-side fix:** network, credentials, or CDC setup on the database.
 3. **Fix that one thing, then retry the same step.** Change one thing at a time. When the error gives a way forward, take it and continue.
 4. **Clean up what a failed step left behind.** A failed `bundle deploy` can leave schemas: offer `bundle destroy` ([feature gates](references/compute-and-feature-gates.md#workspace-feature-gates-all-database-sources)). Report what's left and which errors the workspace showed.
-
-## Common Issues
 
 For common errors and their fixes — duplicate-key violations, watermark / cursor problems, schema evolution, gateway region availability, the `channel` runtime-channel setting, and pipelines that run but land no data — see [troubleshooting-and-monitoring.md](references/troubleshooting-and-monitoring.md), which also has the event-log queries to diagnose them.
 

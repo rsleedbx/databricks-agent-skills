@@ -34,17 +34,17 @@ WHERE SCHEMA_NAME(t.schema_id) + '.' + t.name IN ('dbo.customers', 'dbo.orders')
 
 **Source table changes:**
 
-| On the source | What the pipeline does | What to do |
+| Symptom | Likely cause | Fix |
 |---|---|---|
-| `DELETE` every row, then `INSERT` | Applied like any other change | Nothing |
-| `TRUNCATE` on a CDC table | SQL Server refuses it (Msg 4711). CDC off, `TRUNCATE`, CDC on (`lakeflowSetupChangeDataCapture`): the table stops with `INGESTION_GATEWAY_CDC_LOG_TRUNCATED` | Full refresh of the table, or `auto_full_refresh_policy` on it |
-| `TRUNCATE` on a change-tracking table | Depends on the build: either no error and the destination keeps the truncated rows, or the update fails with `INGESTION_GATEWAY_UNTRACEABLE_TABLE_MODIFICATION` and later inserts don't arrive ([SQL Server behaviors](database-source-behaviors-sql-server.md)) | Full refresh of the table after every `TRUNCATE`. Prefer `DELETE` on change-tracking tables |
-| Drop and recreate a change-tracking table | **No error; the destination keeps the old rows** | Full refresh of the table |
-| Drop and recreate a CDC table | `INGESTION_GATEWAY_CDC_LOG_TRUNCATED`; a full refresh then reports success but keeps the old rows, and the next update fails with `MANAGED_INGESTION_CANNOT_CHANGE_SOURCE_FOR_EXISTING_DESTINATION_TABLE` | Map the recreated table to a new `destination_table` |
-| Primary key change or column rename on a CDC table | SQL Server refuses it while CDC captures the table (Msg 22979, 4928). CDC off, change, CDC on: `INGESTION_GATEWAY_CDC_LOG_TRUNCATED` | Full refresh, or the policy |
-| Column rename on a change-tracking table | `CDC_INCOMPATIBLE_SCHEMA_CHANGES.COLUMNS_ADDED_AND_DELETED` | Full refresh, or the policy |
-| Widen or narrow a column type, `DROP COLUMN` | Applied; the destination keeps the old type and the dropped column | Nothing (full refresh to take the new type) |
-| Add a table to the ingestion definition | The new table gets its own snapshot; the others aren't reset | Nothing |
+| Applied like any other change | `DELETE` every row, then `INSERT` | Nothing |
+| SQL Server refuses it (Msg 4711). CDC off, `TRUNCATE`, CDC on (`lakeflowSetupChangeDataCapture`): the table stops with `INGESTION_GATEWAY_CDC_LOG_TRUNCATED` | `TRUNCATE` on a CDC table | Full refresh of the table, or `auto_full_refresh_policy` on it |
+| Depends on the build: either no error and the destination keeps the truncated rows, or the update fails with `INGESTION_GATEWAY_UNTRACEABLE_TABLE_MODIFICATION` and later inserts don't arrive ([SQL Server behaviors](database-source-behaviors-sql-server.md)) | `TRUNCATE` on a change-tracking table | Full refresh of the table after every `TRUNCATE`. Prefer `DELETE` on change-tracking tables |
+| **No error; the destination keeps the old rows** | Drop and recreate a change-tracking table | Full refresh of the table |
+| `INGESTION_GATEWAY_CDC_LOG_TRUNCATED`; a full refresh then reports success but keeps the old rows, and the next update fails with `MANAGED_INGESTION_CANNOT_CHANGE_SOURCE_FOR_EXISTING_DESTINATION_TABLE` | Drop and recreate a CDC table | Map the recreated table to a new `destination_table` |
+| SQL Server refuses it while CDC captures the table (Msg 22979, 4928). CDC off, change, CDC on: `INGESTION_GATEWAY_CDC_LOG_TRUNCATED` | Primary key change or column rename on a CDC table | Full refresh, or the policy |
+| `CDC_INCOMPATIBLE_SCHEMA_CHANGES.COLUMNS_ADDED_AND_DELETED` | Column rename on a change-tracking table | Full refresh, or the policy |
+| Applied; the destination keeps the old type and the dropped column | Widen or narrow a column type, `DROP COLUMN` | Nothing (full refresh to take the new type) |
+| The new table gets its own snapshot; the others aren't reset | Add a table to the ingestion definition | Nothing |
 
 ---
 

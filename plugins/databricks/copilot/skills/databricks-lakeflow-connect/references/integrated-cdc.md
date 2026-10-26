@@ -16,10 +16,10 @@ There are two ways to run a database CDC connector:
 
 **Check current status before you build.** Integrated CDC is changing quickly: which sources support it, release stage, classic vs serverless compute, the runtime channel, and how long updates run all change from release to release. Treat the table below as a starting point, not the answer. Before creating a pipeline, fetch the current page for the source (or find it from `https://docs.databricks.com/llms.txt`, see **databricks-docs**) and use what it says:
 
-| Source | Integrated CDC page | Last seen |
+| Source | Integrated CDC page | Release stage |
 |---|---|---|
 | SQL Server | [sql-server-integrated-pipeline](https://docs.databricks.com/ingestion/lakeflow-connect/sql-server-integrated-pipeline) | GA |
-| MySQL | [mysql-integrated-pipeline](https://docs.databricks.com/ingestion/lakeflow-connect/mysql-integrated-pipeline) | Beta |
+| MySQL | [mysql-integrated-pipeline](https://docs.databricks.com/ingestion/lakeflow-connect/mysql-integrated-pipeline) | GA |
 | Oracle | [oracle-integrated-overview](https://docs.databricks.com/ingestion/lakeflow-connect/oracle-integrated-overview) | Beta; `channel: PREVIEW`; serverless works; integrated only; [grants and errors](database-source-behaviors-oracle.md) |
 | PostgreSQL | none yet: standard CDC only | — |
 | All | [smart-closure](https://docs.databricks.com/ingestion/lakeflow-connect/smart-closure): how long an update runs | — |
@@ -88,7 +88,7 @@ resources:
 
 On a serverless-only workspace, integrated CDC on SQL Server (change tracking on a table with a primary key, SQL Server CDC on one without), MySQL and Oracle (`channel: PREVIEW`, `serverless: true`, each object's `source_catalog` = the PDB, with the connection's `service_name` = the CDB's service; see [query-based-pipeline.md](query-based-pipeline.md) Step 1) takes the snapshot, then applies inserts, updates, and deletes while the update is still running. Tables without a primary key end up with the same rows as the source.
 
-For MySQL, address tables by `source_schema: <mysql-database>` with no `source_catalog`, and add `channel: PREVIEW` while the docs page requires it. The MySQL page lists classic compute. A serverless-only workspace refuses classic ("You must use serverless compute in this workspace"), and `serverless: true` runs. The example leaves `serverless` out, as everywhere: add `serverless: true` only when the workspace asks for it, as that one did.
+For MySQL, address tables by `source_schema: <mysql-database>` with no `source_catalog`; `channel` is optional (default `CURRENT`). The MySQL page lists classic compute. A serverless-only workspace refuses classic ("You must use serverless compute in this workspace"), and `serverless: true` runs. The example leaves `serverless` out, as everywhere: add `serverless: true` only when the workspace asks for it, as that one did.
 
 ```yaml
     mysql_cdc:
