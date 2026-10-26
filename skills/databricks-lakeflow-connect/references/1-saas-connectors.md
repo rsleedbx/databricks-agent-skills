@@ -12,7 +12,7 @@ Three steps for every SaaS connector:
    - **OAuth U2M** connections (Salesforce, ServiceNow, HubSpot, Confluence) must be created in Catalog Explorer — the OAuth handshake requires a browser. CLI and DAB cannot bootstrap U2M.
    - **API-key / basic / refresh-token** connections (Workday Reports, GA4 via service account, ServiceNow basic) can be created with `databricks connections create` or a DAB resource.
 2. **Create the ingestion pipeline** with `databricks pipelines create --json` (or DAB). The pipeline carries the `ingestion_definition` block that names the connection and lists the source objects to land.
-3. **Schedule the pipeline**. Lakeflow Connect supports triggered runs only — schedule with a Jobs `pipeline_task` (cron or interval). The pipeline's `continuous: false` setting selects triggered mode but does not itself carry a schedule.
+3. **Schedule the pipeline**. SaaS pipelines run triggered only — schedule with a Jobs `pipeline_task` (cron or interval). The pipeline's `continuous: false` setting selects triggered mode but does not itself carry a schedule.
 
 A minimal pipeline JSON:
 

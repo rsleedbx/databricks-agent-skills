@@ -5,7 +5,7 @@ Lakeflow Connect setup and cleanup often needs SQL on the source: list tables, c
 Two ways to run it:
 
 - **One query, from the CLI:** `databricks experimental aitools tools query --file <file>.sql`. This is what Step 0 of [3-query-based-connectors.md](3-query-based-connectors.md) uses. Good for a single check.
-- **Several queries and actions, as a notebook:** upload the notebook below and run it once with `databricks jobs submit`. That's a one-time run: it doesn't create a job in the Jobs UI. Use it for listing everything at once, and for slot create / drop.
+- **Several queries and actions, as a notebook:** upload the notebook in [7a-source-sql-notebook.md](7a-source-sql-notebook.md) and run it once with `databricks jobs submit`. That's a one-time run: it doesn't create a job in the Jobs UI. Use it for listing everything at once, and for slot create / drop.
 
 Don't read UC secrets or ask for the password to do this. The connection is the credential.
 
@@ -53,7 +53,7 @@ databricks connections get <connection> --profile <PROFILE> -o json | yq -r .own
 Without `CREATE_CATALOG` on the metastore, creation fails with "User does not have CREATE CATALOG on Metastore". Say so and use the `remote_query` introspection below instead; it needs nothing extra.
 
 - **Name:** `<firstname><lastname>-<connection>`, with no epoch: like the connection, a foreign catalog is shared by many pipelines. If a catalog with that name exists for something else, append `-2`, `-3`. The name has hyphens, so quote it with backticks in SQL.
-- **Create.** Options per source (each tested with a query-based pipeline reading through the catalog): PostgreSQL and SQL Server `{"database": "<database>"}`; MySQL none (leave `options` out); Oracle `{"service_name": "<PDB>"}`, for example `FREEPDB1` (see the Oracle row in [3-query-based-connectors.md](3-query-based-connectors.md#step-1--uc-connection)). Use `--json` only: `catalogs create` has no `--options` flag, and it rejects a positional name together with `--json`. When the connection's name already starts with `<firstname><lastname>` followed by `-` or `_` (the SKILL.md rule), the catalog is `<connection>-fc` (for example `janedoe-mysql-azvm-fc`), not the prefix twice.
+- **Create.** Options per source (each tested with a query-based pipeline reading through the catalog): PostgreSQL and SQL Server `{"database": "<database>"}`; MySQL none (leave `options` out); Oracle `{"service_name": "<PDB>"}`, for example `FREEPDB1` (see the Oracle row in [3-query-based-connectors.md](3b-query-based-pipeline.md#step-1--uc-connection)). Use `--json` only: `catalogs create` has no `--options` flag, and it rejects a positional name together with `--json`. When the connection's name already starts with `<firstname><lastname>` followed by `-` or `_` (the [default names](9-default-names.md) rule), the catalog is `<connection>-fc` (for example `janedoe-mysql-azvm-fc`), not the prefix twice.
 
 ```bash
 # PostgreSQL, SQL Server
@@ -182,138 +182,7 @@ With the column and key lists, write change scripts that exercise a pipeline: fo
 - **Tables without a key:** inserts only, or updates and deletes matched on all columns. Say that duplicate rows make these ambiguous.
 - **Dialect:** `LIMIT` (Postgres, MySQL) vs `TOP` (SQL Server); `now()` vs `SYSDATETIME()`; identifier quoting.
 
-**Running it:** the UC connection can't run DML (`remote_query` only runs queries). Give the user the script to run on the source, and say which tables and how many rows it touches. For Lakebase you're the project owner, so run it yourself with `databricks psql ... -f` (see the mutate step in [6-lakebase-as-postgres-source.md](6-lakebase-as-postgres-source.md)). After the next pipeline run, check that the changes arrived. SCD1 tables: the rows-per-run report in [5-troubleshooting-and-monitoring.md](5-troubleshooting-and-monitoring.md#rows-per-table-per-run-snapshot-inserts-upserts-deletes) should show your inserts plus updates as `upserted` and your deletes as `deleted`. SCD2 tables: use the per-key count from the table in the same file, because the event-log counts for SCD2 aren't change counts. Also spot-check the rows you touched (the new keys exist, updated columns have the new values, deleted keys are gone or closed).
-
----
-
-## The notebook
-
-Save as `source_sql.py` (the first line marks it as a Databricks notebook). It takes the connection type as a parameter, so look it up first:
-
-```bash
-databricks connections get <connection> --profile <PROFILE> -o json | yq -r .connection_type   # POSTGRESQL | MYSQL | SQLSERVER
-```
-
-```python
-# Databricks notebook source
-# Source-side SQL through a Unity Catalog connection (remote_query), for Lakeflow Connect setup and cleanup.
-# Widgets:
-#   connection  UC connection name
-#   conn_type   connection type from `databricks connections get <name>`: POSTGRESQL | MYSQL | SQLSERVER
-#   database    source database (blank for MySQL)
-#   action      list | create_slot | drop_slot   (slot actions: PostgreSQL only)
-#   slot_name   exact replication slot name for create_slot / drop_slot
-import json
-
-dbutils.widgets.text("connection", "")
-dbutils.widgets.text("conn_type", "")
-dbutils.widgets.text("database", "")
-dbutils.widgets.dropdown("action", "list", ["list", "create_slot", "drop_slot"])
-dbutils.widgets.text("slot_name", "")
-conn = dbutils.widgets.get("connection")
-database = dbutils.widgets.get("database")
-action = dbutils.widgets.get("action")
-slot_name = dbutils.widgets.get("slot_name").strip()
-conn_type = dbutils.widgets.get("conn_type").upper()
-
-import re
-# These go into SQL literals: allow only plain identifier characters
-for name, value in (("connection", conn), ("database", database)):
-    if value and not re.fullmatch(r"[A-Za-z0-9_.\-]+", value):
-        raise ValueError(f"{name} has unexpected characters: {value!r}")
-
-
-def rq(query):
-    """Run one query on the source through the UC connection; returns a list of dicts."""
-    db_arg = f", database => '{database}'" if database else ""
-    q = query.replace("\\", "\\\\").replace('"', '\\"')
-    rows = spark.sql(f"SELECT * FROM remote_query('{conn}'{db_arg}, query => \"{q}\")").collect()
-    return [{k: (str(v) if v is not None else None) for k, v in r.asDict().items()} for r in rows]
-
-
-def pg_slots():
-    return rq("SELECT slot_name, plugin, database, active, temporary FROM pg_replication_slots")  # no inactive_since: PG 17+ only
-
-
-out = {"connection": conn, "type": conn_type, "database": database or None, "action": action}
-
-if action in ("create_slot", "drop_slot"):
-    if conn_type != "POSTGRESQL":
-        raise ValueError(f"{action} is PostgreSQL only, connection type is {conn_type}")
-    if not database:
-        raise ValueError(f"{action} requires database to be set")
-    if not re.fullmatch(r"[a-z0-9_]+", slot_name):
-        raise ValueError("slot_name must be lowercase ASCII letters, digits, and underscores")
-    slots = pg_slots()   # list once; each remote_query is a separate source session
-    exists = any(s["slot_name"] == slot_name for s in slots)
-    if action == "create_slot":
-        out["result"] = "already exists" if exists else rq(
-            f"SELECT slot_name, lsn FROM pg_create_logical_replication_slot('{slot_name}', 'pgoutput')")
-    else:
-        # Drop only the slot named here, and only if nothing is reading from it.
-        active = [s for s in slots if s["slot_name"] == slot_name and str(s["active"]).lower() == "true"]
-        if active:
-            raise ValueError(f"slot {slot_name} is active; stop the gateway first")
-        out["result"] = "not found" if not exists else rq(
-            f"SELECT '{slot_name}' AS dropped FROM (SELECT pg_drop_replication_slot('{slot_name}')) d")
-    out["slots"] = pg_slots()
-else:
-    if conn_type == "MYSQL":
-        out["tables"] = rq("""
-            SELECT table_schema, table_name FROM information_schema.tables
-            WHERE table_type = 'BASE TABLE'
-              AND table_schema NOT IN ('mysql', 'sys', 'information_schema', 'performance_schema')""")
-    elif conn_type == "SQLSERVER":
-        out["tables"] = rq("SELECT s.name AS table_schema, t.name AS table_name FROM sys.tables t JOIN sys.schemas s ON s.schema_id = t.schema_id WHERE t.is_ms_shipped = 0")
-    elif conn_type == "POSTGRESQL":
-        out["tables"] = rq("""
-            SELECT table_schema, table_name FROM information_schema.tables
-            WHERE table_type = 'BASE TABLE' AND table_schema NOT IN ('pg_catalog', 'information_schema')""")
-        out["publications"] = rq("""
-            SELECT p.pubname, pg_get_userbyid(p.pubowner) AS owner,
-                   (SELECT string_agg(schemaname || '.' || tablename, ', ') FROM pg_publication_tables t WHERE t.pubname = p.pubname) AS tables
-            FROM pg_publication p""")
-        out["slots"] = pg_slots()
-    else:
-        raise ValueError(f"unsupported connection type {conn_type}")
-    out["table_count"] = len(out["tables"])
-
-dbutils.notebook.exit(json.dumps(out))
-```
-
-## Running it
-
-Upload once, then submit one-time runs. Several tasks in one submit run in parallel, or in order with `depends_on`.
-
-```bash
-NB=/Workspace/Users/<user>/.lfc_skill/source_sql
-databricks workspace mkdirs /Workspace/Users/<user>/.lfc_skill --profile <PROFILE>
-databricks workspace import $NB --file source_sql.py --format SOURCE --language PYTHON --overwrite --profile <PROFILE>
-databricks jobs submit --json @submit.json --profile <PROFILE> -o json > run.json
-```
-
-`submit.json`, listing a Postgres source (use `"action": "create_slot"` or `"drop_slot"` with `"slot_name"` for slot work):
-
-```json
-{
-  "run_name": "lfc-source-sql",
-  "tasks": [
-    {"task_key": "list", "notebook_task": {
-      "notebook_path": "/Workspace/Users/<user>/.lfc_skill/source_sql",
-      "base_parameters": {"connection": "<connection>", "conn_type": "POSTGRESQL", "database": "<database>", "action": "list"}}}
-  ]
-}
-```
-
-No cluster spec means it runs on serverless. `jobs submit` waits for the run (about a minute including startup). Read each task's result from its **task** run ID, not the parent run ID:
-
-```bash
-RID=$(yq -r .run_id run.json)
-databricks jobs get-run $RID --profile <PROFILE> -o json | yq -r '.tasks[] | "\(.task_key)\t\(.run_id)\t\(.state.result_state)"'
-databricks jobs get-run-output <task-run-id> --profile <PROFILE> -o json | yq -r '.notebook_output.result // .error'
-```
-
-If a task fails, `jobs submit` exits non-zero and `run.json` can be empty: find the run with `databricks jobs list-runs --limit 5 -o json` by `run_name`.
+**Running it:** the UC connection can't run DML (`remote_query` only runs queries). Give the user the script to run on the source, and say which tables and how many rows it touches. For Lakebase you're the project owner, so run it yourself with `databricks psql ... -f` (see the mutate step in [6-lakebase-as-postgres-source.md](6-lakebase-as-postgres-source.md)). After the next pipeline run, check that the changes arrived. SCD1 tables: the rows-per-run report in [5-troubleshooting-and-monitoring.md](5a-rows-per-run.md#rows-per-table-per-run-snapshot-inserts-upserts-deletes) should show your inserts plus updates as `upserted` and your deletes as `deleted`. SCD2 tables: use the per-key count from the table in the same file, because the event-log counts for SCD2 aren't change counts. Also spot-check the rows you touched (the new keys exist, updated columns have the new values, deleted keys are gone or closed).
 
 ---
 
@@ -321,7 +190,7 @@ If a task fails, `jobs submit` exits non-zero and `run.json` can be empty: find 
 
 An unused slot holds WAL on the source until someone drops it, so create it as late as possible:
 
-1. **Pick the names, one pair per pipeline:** slot `<slot_name>` and publication `<slot_name>_pub`, where `<slot_name>` is `<base>_<epoch>` of this pipeline pair (see **Default names** in SKILL.md: the pipelines are `<base>_gw_<epoch>` / `<base>_ap_<epoch>`). Take it from the pipelines, never from the destination schema: the user may name the schema, and several pipelines can share one. For example slot `janedoe_my_pg_conn_1792351234` and publication `janedoe_my_pg_conn_1792351234_pub`. Run `action: list` to make sure neither name is taken. Put both in the ingestion pipeline's `source_configurations` → `postgres.slot_config` (`slot_name`, `publication_name`); see [2-database-connectors.md](2-database-connectors.md#postgresql-cdc).
+1. **Pick the names, one pair per pipeline:** slot `<slot_name>` and publication `<slot_name>_pub`, where `<slot_name>` is `<base>_<epoch>` of this pipeline pair (see [Default names](9-default-names.md): the pipelines are `<base>_gw_<epoch>` / `<base>_ap_<epoch>`). Take it from the pipelines, never from the destination schema: the user may name the schema, and several pipelines can share one. For example slot `janedoe_my_pg_conn_1792351234` and publication `janedoe_my_pg_conn_1792351234_pub`. Run `action: list` to make sure neither name is taken. Put both in the ingestion pipeline's `source_configurations` → `postgres.slot_config` (`slot_name`, `publication_name`); see [2-database-connectors.md](2e-postgresql-cdc.md#postgresql-cdc).
 2. **Publication (the user runs it), before anything else exists:** give the user this statement, listing only this pipeline's tables, and wait for them to confirm. Then check it with `action: list`:
 
    ```sql
@@ -330,7 +199,7 @@ An unused slot holds WAL on the source until someone drops it, so create it as l
 
 3. **Create the pipelines:** `bundle deploy`. This is where a workspace without Postgres CDC fails ("Ingestion source 'POSTGRESQL' is not supported in your workspace", 403). If it fails, give the user `DROP PUBLICATION <slot_name>_pub;` and stop. If it succeeds, the gateway is a continuous pipeline and **starts on its own**, and errors until the slot exists: stop it with `databricks pipelines stop <gateway-id>`.
 4. **Slot (through the connection):** `action: create_slot` with `slot_name: <slot_name>` and `database: <database>` (the database the publication is in; a slot belongs to one database). Then start the gateway (`databricks pipelines start-update <gateway-id>`) and run the ingestion pipeline.
-5. **Cleanup after the test** (ask first): `bundle destroy` (or delete the pipelines) so the gateway stops reading. Then run `action: drop_slot` with this pipeline's slot name and database, and give the user `DROP PUBLICATION <slot_name>_pub;` to run. Finish with `action: list` to confirm both are gone.
+5. **Cleanup** (ask first): `bundle destroy` (or delete the pipelines) so the gateway stops reading. Then run `action: drop_slot` with this pipeline's slot name and database, and give the user `DROP PUBLICATION <slot_name>_pub;` to run. Finish with `action: list` to confirm both are gone.
 
 If anything fails after the slot exists, drop the slot before you stop, or tell the user it's there and why it matters: a slot nobody reads keeps holding WAL and can fill the source disk, especially when `max_slot_wal_keep_size` is `-1`.
 

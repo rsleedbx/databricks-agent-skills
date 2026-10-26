@@ -115,7 +115,7 @@ See the [Databricks pricing page](https://www.databricks.com/product/pricing) an
 A few situations where you'll reach for one of the alternatives:
 
 - **The connector for your source isn't in the catalog.** Check the [connector reference](https://docs.databricks.com/ingestion/lakeflow-connect/) — if your source isn't listed, use Auto Loader (if it's files), a hand-rolled Structured Streaming job, or wait for the connector to ship.
-- **You need continuous ingestion.** Lakeflow Connect runs triggered only (no continuous mode). For sub-minute latency on file sources, use Auto Loader with `Trigger.AvailableNow` on a short interval, or Structured Streaming directly.
+- **You need continuous ingestion.** Query-based and standard-CDC Lakeflow Connect pipelines run triggered only; integrated CDC has a continuous option. For sub-minute latency on file sources, use Auto Loader with `Trigger.AvailableNow` on a short interval, or Structured Streaming directly.
 - **You need to push instead of pull.** That's Zerobus.
 - **You want zero copy.** That's Lakehouse Federation.
 

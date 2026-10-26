@@ -7,7 +7,7 @@ Lakebase is real Postgres, so it can stand in for a customer's external PostgreS
 | Connector | Lakebase status |
 |---|---|
 | Postgres **query-based** | Works today. Follow this page. |
-| Postgres **CDC** (gateway) | Rolling out. Try creating the publication (end of this page); if it fails, use query-based. |
+| Postgres **CDC** (gateway) | Rolling out. Try creating the publication ([6a-lakebase-cdc.md](6a-lakebase-cdc.md)); if it fails, use query-based. |
 
 For Lakebase basics (projects, branches, endpoints, `databricks postgres` / `databricks psql`), load **databricks-lakebase** first.
 
@@ -24,8 +24,8 @@ Collect these before running any create command. Use what the user already gave 
 | Target UC catalog (a regular managed catalog, not the Lakebase database catalog) | none: the user must pick |
 | Target schema | `<name>`, the same as the pipeline (unique, so two people's demos in one catalog don't write the same tables). Examples below write `<target_schema>`. |
 | Postgres schema for this demo (also names the role and connection) | `<base>` (e.g. `mydb`): drives the role `<base>_reader` and connection `<firstname><lastname>-<base>-lakebase` |
-| Pipeline, schema, job, and bundle name | `<name>` = `<firstname><lastname>_<connection>_<epoch>` (e.g. `janedoe_mydb_lakebase_1792351234`); see **Default names** in SKILL.md |
-| Connector | query-based (Lakebase CDC: see the end of this page) |
+| Pipeline, schema, job, and bundle name | `<name>` = `<firstname><lastname>_<connection>_<epoch>` (e.g. `janedoe_mydb_lakebase_1792351234`); see [Default names](9-default-names.md) |
+| Connector | query-based (Lakebase CDC: see [6a-lakebase-cdc.md](6a-lakebase-cdc.md)) |
 | Seed the `<base>` tables from Step 3 | yes |
 | Schedule job | no (run on demand) |
 
@@ -237,7 +237,7 @@ targets:
 resources:
   pipelines:
     lakebase_qbc:
-      name: <name>           # default naming, see SKILL.md
+      name: <name>           # default naming, see 9-default-names.md
       catalog: ${var.catalog}
       schema: <target_schema>
       ingestion_definition:
@@ -322,7 +322,7 @@ SELECT status, count(*) FROM <catalog>.<target_schema>.orders GROUP BY status;
 SELECT * FROM <catalog>.<target_schema>.orders WHERE order_id = 200;   -- 0 rows
 ```
 
-Then show what each run did, per table: run the **Rows per table per run** query in [5-troubleshooting-and-monitoring.md](5-troubleshooting-and-monitoring.md#rows-per-table-per-run-snapshot-inserts-upserts-deletes). Get the pipeline ID from `databricks bundle summary -t dev --var catalog=<catalog> -o json --profile <PROFILE>` (`resources.pipelines.lakebase_qbc.id`). For this demo, run 1 should show `snapshot` with 1,000 customers and 10,000 orders under `snapshot_inserted`. Run 2 should be `incremental`: `orders` shows about 100 upserts and 1 delete, matching the mutations above. It can be a few more than 100, because a timestamp cursor re-reads a short lookback window before the high-water mark; that's expected, not a pipeline problem. Put the counts next to the mutations so the audience can see each change arrive. If an SCD2 count (`customers`) is higher than the number of changes, say it's the connector's merge count, not the number of source changes.
+Then show what each run did, per table: run the **Rows per table per run** query in [5-troubleshooting-and-monitoring.md](5a-rows-per-run.md#rows-per-table-per-run-snapshot-inserts-upserts-deletes). Get the pipeline ID from `databricks bundle summary -t dev --var catalog=<catalog> -o json --profile <PROFILE>` (`resources.pipelines.lakebase_qbc.id`). For this demo, run 1 should show `snapshot` with 1,000 customers and 10,000 orders under `snapshot_inserted`. Run 2 should be `incremental`: `orders` shows about 100 upserts and 1 delete, matching the mutations above. It can be a few more than 100, because a timestamp cursor re-reads a short lookback window before the high-water mark; that's expected, not a pipeline problem. Put the counts next to the mutations so the audience can see each change arrive. If an SCD2 count (`customers`) is higher than the number of changes, say it's the connector's merge count, not the number of source changes.
 
 **Talking points:** no CDC setup on the source; one serverless pipeline; the cursor and lookback window; QBC captures latest state per run, not every intermediate change — that's what the CDC connector adds.
 
@@ -351,38 +351,3 @@ DROP ROLE :"rolname";
 ```
 
 Keep the `lfc-demo` project by default, since other demos reuse it; drop only this demo's schema and role. Delete the project only if the user asks. `databricks postgres delete-project` is a soft delete: the project name stays reserved for about 7 days, so the next demo needs a different name.
-
----
-
-## Postgres CDC on Lakebase: try it, then fall back
-
-Lakebase support for publications and replication slots is being rolled out, and there's no fixed date. Don't assume either way: when the user asks for Postgres CDC on Lakebase, **try creating this demo's publication**. If that fails, CDC can't run on this Lakebase yet. Tell the user and use query-based.
-
-You're connected as the project owner through `databricks psql`, so you can run DDL directly here (unlike an external source behind a UC connection). Run the probe as one `-f` file:
-
-Save as `probe.sql` and run it the same way:
-
-```bash
-databricks psql --project <project-id> --profile <PROFILE> -- \
-  -X -v ON_ERROR_STOP=1 -v base=<base> -v slot_name="<slot_name>" -f probe.sql
-```
-
-```sql
-SHOW wal_level;
-SELECT rolreplication FROM pg_roles WHERE rolname = current_user;
-SELECT :'slot_name' || '_pub' AS pubname \gset
-CREATE PUBLICATION :"pubname" FOR TABLE :"base".customers, :"base".orders;
-```
-
-How to read the result:
-
-- **The `CREATE PUBLICATION` fails** with "[Databricks Auth] CREATE PUBLICATION is not enabled on this Lakebase instance": CDC isn't available on this Lakebase yet, even though `wal_level` is `logical` and the role has `REPLICATION` (both are true on current Lakebase). Use query-based. Nothing was created.
-- **It succeeds:** keep the publication and continue with the Postgres CDC section in [2-database-connectors.md](2-database-connectors.md). `<slot_name>` is the pipeline pair's `<base>_<epoch>` (the pipelines are `<base>_gw_<epoch>` / `<base>_ap_<epoch>`; see **Default names** in SKILL.md). The publication is `<slot_name>_pub`. Then deploy the pipelines, stop the gateway (it starts on deploy), create the slot with `SELECT pg_create_logical_replication_slot('<slot_name>', 'pgoutput');`, and start the gateway, the same order as in [2-database-connectors.md](2-database-connectors.md). If the slot or the pipelines fail, drop what you created (`DROP PUBLICATION <slot_name>_pub;`, `SELECT pg_drop_replication_slot('<slot_name>');`) and fall back to query-based.
-
-Lakebase-specific checks once CDC works:
-
-- **Leave Lakebase's own slots alone** (for example `wal_proposer_slot` and `wal_retention_slot`). Only ever drop this demo's slot, by name.
-- **The replication role needs a native password,** for the same reason as Step 2.
-- **The gateway must be able to reach the Lakebase endpoint.** Check the gateway's compute options in the current docs.
-- **A stopped gateway lets WAL pile up on the slot.** Drop the slot and the publication at teardown.
-- **Reuse the Step 3 tables.** `REPLICA IDENTITY DEFAULT` is fine since they have primary keys, and the `updated_at` / `is_deleted` columns are harmless under CDC. The demo moves from query-based to CDC by changing only the connection and pipelines.
