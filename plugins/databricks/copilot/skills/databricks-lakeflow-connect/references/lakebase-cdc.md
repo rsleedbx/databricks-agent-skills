@@ -28,7 +28,7 @@ How to read the result:
 Lakebase-specific checks once CDC works:
 
 - **Leave Lakebase's own slots alone** (for example `wal_proposer_slot` and `wal_retention_slot`). Only ever drop this demo's slot, by name.
-- **The replication role needs a native password,** for the same reason as Step 2.
-- **The gateway must be able to reach the Lakebase endpoint.** Check the gateway's compute options in the current docs.
+- **The replication role needs a native password,** for the same reason as Step 2 of [lakebase-as-postgres-source.md](lakebase-as-postgres-source.md).
+- **The gateway must be able to reach the Lakebase endpoint** from the compute it runs on ([compute](compute-and-feature-gates.md#compute-serverless-or-classic)).
 - **A stopped gateway lets WAL pile up on the slot.** Drop the slot and the publication at teardown.
-- **Reuse the Step 3 tables.** `REPLICA IDENTITY DEFAULT` is fine since they have primary keys, and the `updated_at` / `is_deleted` columns are harmless under CDC. The demo moves from query-based to CDC by changing only the connection and pipelines.
+- **Reuse the Step 3 tables** of [lakebase-as-postgres-source.md](lakebase-as-postgres-source.md). `REPLICA IDENTITY DEFAULT` is fine since they have primary keys, and the `updated_at` / `is_deleted` columns are harmless under CDC. The demo moves from query-based to CDC by changing only the connection and pipelines.

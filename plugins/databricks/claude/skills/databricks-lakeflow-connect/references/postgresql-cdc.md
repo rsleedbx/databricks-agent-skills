@@ -2,7 +2,7 @@
 
 Same gateway pattern as SQL Server. Postgres logical replication (`pgoutput`) replaces CT/CDC. Supports PostgreSQL 13+, including RDS / Aurora, Azure Database for PostgreSQL Flexible Server, and Cloud SQL.
 
-Slot creation and loss, `wal_level`, replica identity and TLS errors, with their exact text and fixes: [database-source-behaviors-postgresql.md](database-source-behaviors-postgresql.md).
+Slot creation and loss, `wal_level`, replica identity and TLS errors, and the docs troubleshooting page: [database-source-behaviors-postgresql.md](database-source-behaviors-postgresql.md).
 
 ### Source setup
 
@@ -49,7 +49,7 @@ resources:
       gateway_definition:
         connection_name: my_pg_connection
         gateway_storage_catalog: ${var.catalog}
-        gateway_storage_schema: <base>_<epoch>_stg
+        gateway_storage_schema: <base>_<epoch>_staging
         gateway_storage_name: <base>_gw_<epoch>
 
     pg_ingestion:
@@ -92,7 +92,7 @@ SELECT c.relname, c.relreplident FROM pg_class c
 
 ### Postgres-specific gotchas
 
-Each error with its exact text, and the behaviors on a named slot after delete: [database-source-behaviors-postgresql.md](database-source-behaviors-postgresql.md).
+Errors on the slot, `wal_level`, replica identity and TLS: [database-source-behaviors-postgresql.md](database-source-behaviors-postgresql.md).
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
@@ -102,9 +102,7 @@ Each error with its exact text, and the behaviors on a named slot after delete: 
 | Table not replicating | Not in the publication | `ALTER PUBLICATION <slot_name>_pub ADD TABLE <schema>.<table>;` |
 | Gateway create fails: "Ingestion source 'POSTGRESQL' is not supported in your workspace" (403) | Postgres CDC isn't enabled on this workspace (query-based Postgres can still work) | Ask the Databricks account team or support to enable it. Don't work around it. If you already created a slot, drop it. The deploy may have created the destination and staging schemas before failing: offer `bundle destroy` to remove them. |
 | Slot creation fails | Wrong role, or `wal_level` not `logical` | Create the slot as the `REPLICATION` role, after the publication, with `pgoutput`. |
-| Gateway: `INGESTION_GATEWAY_CONNECTION_ERROR.SOURCE_AUTHENTICATION_FAILURE` "… The server does not support SSL" | The gateway requires SSL; `remote_query` through the same connection works without it | Turn on `ssl` on the source. With a self-signed certificate, add `"trustServerCertificate": "true"` to the connection's options |
-| A table stops with `INGESTION_GATEWAY_DDL_NOT_SUPPORTED.UNSUPPORTED_DDL` after `ADD COLUMN` (nullable or not), `DROP COLUMN` or `RENAME COLUMN` | By default, Postgres column changes aren't applied in place | Full refresh of the table, or `auto_full_refresh_policy` on it. Type changes and a `TRUNCATE` (`…TRUNCATE_TABLE`, also covered by the policy) are handled; the destination keeps a column's old type |
-| `INGESTION_GATEWAY_CDC_NOT_ENABLED`: "has a TOAST-able type column, and needs FULL REPLICA IDENTITY" | A table with an unbounded TOAST-able column (`TEXT` and alike) under `REPLICA IDENTITY DEFAULT`, including after adding such a column or switching a table to `DEFAULT` or `NOTHING` (it fails at the next changes, not at the DDL) | `ALTER TABLE … REPLICA IDENTITY FULL`, then a full refresh of the table. Bounded types (`VARCHAR(n)`) are fine under `DEFAULT` |
+| A table stops with `INGESTION_GATEWAY_DDL_NOT_SUPPORTED` after a column change (`ADD`, `DROP` or `RENAME COLUMN`) | Which column changes are applied in place changes between releases: see the [limitations page](https://docs.databricks.com/ingestion/lakeflow-connect/postgresql-limits) | Full refresh the table, or set `auto_full_refresh_policy` on it. |
 
 Using Lakebase as the Postgres source for a demo: see [lakebase-as-postgres-source.md](lakebase-as-postgres-source.md). For CDC on Lakebase, try creating the publication first: if Lakebase refuses it ("CREATE PUBLICATION is not enabled on this Lakebase instance"), CDC can't run there yet, so use query-based.
 

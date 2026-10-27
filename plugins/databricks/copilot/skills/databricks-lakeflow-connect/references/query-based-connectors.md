@@ -2,7 +2,7 @@
 
 Query-based connectors (QBC) ingest from databases that have no CDC feed configured, or where you don't want to set one up. Instead of reading a change log, the connector runs a query on each scheduled run and pulls the rows whose cursor value moved past the last high-water mark.
 
-Supported sources (foreign connection): **Oracle, Teradata, SQL Server, MySQL, MariaDB, PostgreSQL**. Any Lakehouse Federation source is also supported through a foreign catalog. Status: Public Preview.
+Supported sources (foreign connection): **Oracle, Teradata, SQL Server, MySQL, MariaDB, PostgreSQL**. Any Lakehouse Federation source is also supported through a foreign catalog. Status: GA; check the [query-based connector limitations](https://docs.databricks.com/ingestion/lakeflow-connect/query-based-limits) for current limits.
 
 ## How it differs from the gateway pattern
 
@@ -68,7 +68,7 @@ Add an index on the cursor column on large tables so the incremental query doesn
 
 ## What each source shape does with each target
 
-On Postgres (Lakebase) through a UC connection, with inserts, updates, and deletes between two runs:
+With inserts, updates, and deletes between two runs:
 
 | Source shape | `SCD_TYPE_1` | `SCD_TYPE_2` | `APPEND_ONLY` |
 |---|---|---|---|
@@ -76,14 +76,14 @@ On Postgres (Lakebase) through a UC connection, with inserts, updates, and delet
 | Primary key + numeric cursor (bumped on update) | ✅ | ✅ | ✅ |
 | Unique key, no primary key (declare the unique column as `primary_keys`) | ✅ | ✅ | ✅ |
 | No key + cursor, `primary_keys` omitted | ❌ runtime error `CANNOT_INGEST_TABLE_WITHOUT_PRIMARY_KEY` | ❌ same | ✅ (duplicates kept) |
-| No key, **no cursor**, `primary_keys` omitted | ✅ full replace each run | Not verified | ❌ rejected at create: "APPEND_ONLY can only be used for incremental ingestion ... cursor_columns must be set" |
-| Primary key, no cursor | ✅ full load each run, including hard deletes | Not verified | ❌ needs a cursor |
+| No key, **no cursor**, `primary_keys` omitted | ✅ full replace each run | — | ❌ rejected at create: "APPEND_ONLY can only be used for incremental ingestion ... cursor_columns must be set" |
+| Primary key, no cursor | ✅ full load each run, including hard deletes | — | ❌ needs a cursor |
 | Declared key that isn't unique / has NULLs | ⚠️ **accepted, silent data loss**: source rows are lost, and new rows overwrite existing ones | ⚠️ same risk | n/a |
 | Cursor set on insert only (no update trigger) | ⚠️ **updates never arrive**, no warning | ⚠️ same | ⚠️ same |
 | Cursor with NULLs | ⚠️ snapshot loads them; later NULL-cursor rows are skipped | ⚠️ same | ⚠️ same |
 | Hard deletes, `hard_deletion_sync_min_interval_in_seconds` set | ✅ deleted rows removed | not supported (per docs) | n/a |
 
-The two most common shapes were also run on PostgreSQL 16, MySQL 8.4, SQL Server 2022 and Oracle 23ai Free (the same tables on each, through a UC connection to a cloud VM): a primary key + timestamp cursor bumped by a trigger under `SCD_TYPE_1`, and a keyless table + cursor under `APPEND_ONLY`. On the keyless table, an update appends a new row. The results were identical across engines, with the updates applied.
+On a keyless `APPEND_ONLY` table, an update appends a new row.
 
 Through a UC connection, a table with no key gets no synthetic key from all columns: SCD without `primary_keys` fails. Declare a key, or use `APPEND_ONLY`.
 

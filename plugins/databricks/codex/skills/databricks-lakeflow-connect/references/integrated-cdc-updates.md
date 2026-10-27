@@ -29,10 +29,10 @@ Databricks sets and adjusts the minimum runtime, maximum runtime, and lag thresh
   databricks pipelines list-updates <pipeline-id> --max-results 3 -o json | yq '.updates[] | [.update_id, .cause, .state]'
   ```
 
-  On SQL Server, an update that failed right after an added column with `INGESTION_GATEWAY_INTERNAL_ERROR` and an empty "Extractor error:" was followed by the pipeline's own updates, and the column arrived without a full refresh. When it also reports `PIPELINE_NON_RETRYABLE_ANALYSIS_CLIENT_ERROR`, no retry follows: start the next update yourself.
+  A failed update is usually followed by the pipeline's own retry. When it also reports `PIPELINE_NON_RETRYABLE_ANALYSIS_CLIENT_ERROR`, no retry follows: start the next update yourself.
 - **Schedule** it with a Jobs `pipeline_task`. Use the interval the smart closure page recommends (it currently suggests starting at 60 minutes). A trigger that fires while an update is still running is skipped. Continuous mode exists as a separate option; check its status in the docs.
 
-## Behaviour that doesn't change between releases
+## Behavior that doesn't change between releases
 
 - **The first update takes the initial snapshot,** then later updates apply changes.
 - **Tables without a primary key** are keyed on all columns, so identical rows collapse: the table ends up with one row per distinct row. Use SCD Type 2 or add a key at the source if duplicates matter.
@@ -48,4 +48,4 @@ Report rows per table per run with the query in [rows-per-run.md](rows-per-run.m
 - **One table that stops doesn't stop the others,** but the update ends `FAILED` with `PIPELINE_NON_RETRYABLE_ANALYSIS_CLIENT_ERROR` ("… A new pipeline update will not be created") until that table is fixed or full-refreshed. Alert on the update's state, and read the table's error in the event log.
 - **A pipeline can't switch between integrated CDC and a gateway:** `pipelines update` refuses it both ways, a second pipeline can't write to the first one's tables (`TABLE_ALREADY_MANAGED_BY_OTHER_PIPELINE`), and deleting a pipeline deletes its destination tables. Moving means a new pipeline and a full load.
 - **Change data feed is on for destination tables,** readable with `table_changes()` from version 1 (version 0 has no change data: `DELTA_MISSING_CHANGE_DATA`). On an SCD type 2 table a delete shows as a closed row, not a `delete` change.
-- **Many tables per pipeline:** create accepts more tables than the documented integrated CDC limits (50 for `SPEED`, 500 by default, 300 triggered; see [database-source-behaviors.md](database-source-behaviors.md#table-limits)). A 900-table SQL Server pipeline (one schema object per source schema) was accepted and loaded with no reinitialization timeout. Load time and change latency grow with the count, so split large table counts across pipelines.
+- **Many tables per pipeline:** create can accept more tables than the documented integrated CDC limits ([table limits](database-source-behaviors.md#table-limits)). Load time and change latency grow with the count: keep each pipeline within the documented limits, and split larger sets across pipelines.

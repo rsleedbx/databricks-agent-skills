@@ -279,6 +279,7 @@
         "assets/databricks.png",
         "assets/databricks.svg",
         "references/anti-patterns.md",
+        "references/architecture-patterns.md",
         "references/authoring-and-running.md",
         "references/compute-and-feature-gates.md",
         "references/database-connectors.md",

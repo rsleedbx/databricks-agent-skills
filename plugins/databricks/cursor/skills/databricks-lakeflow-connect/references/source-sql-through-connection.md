@@ -4,7 +4,7 @@ Lakeflow Connect setup and cleanup often needs SQL on the source: list tables, c
 
 Two ways to run it:
 
-- **One query, from the CLI:** `databricks experimental aitools tools query --file <file>.sql`. This is what Step 0 of [query-based-connectors.md](query-based-connectors.md) uses. Good for a single check.
+- **One query, from the CLI:** `databricks experimental aitools tools query --file <file>.sql`. This is what Step 0 of [query-based-discovery.md](query-based-discovery.md) uses. Good for a single check.
 - **Several queries and actions, as a notebook:** upload the notebook in [source-sql-notebook.md](source-sql-notebook.md) and run it once with `databricks jobs submit`. That's a one-time run: it doesn't create a job in the Jobs UI. Use it for listing everything at once, and for slot create / drop.
 
 Don't read UC secrets or ask for the password to do this. The connection is the credential.
@@ -33,7 +33,7 @@ Use this when the user doesn't know their tables, or before generating DML. **Ne
 
 ### 1. Pick the catalog (source database)
 
-- **List what the connection can see:** the source databases (Step 0 of [query-based-connectors.md](query-based-connectors.md)), plus any foreign catalogs already on this connection (`databricks catalogs list -o json`, filtered on `connection_name`).
+- **List what the connection can see:** the source databases (Step 0 of [query-based-discovery.md](query-based-discovery.md)), plus any foreign catalogs already on this connection (`databricks catalogs list -o json`, filtered on `connection_name`).
 - **A foreign catalog already exists on this connection** (any name, for example one named after the connection): use it for introspection; don't create another.
 - **Exactly one source database:** use it.
 - **More than one:** ask the user which, and show the list. Don't introspect them all; users can have access to many.
@@ -53,7 +53,7 @@ databricks connections get <connection> --profile <PROFILE> -o json | yq -r .own
 Without `CREATE_CATALOG` on the metastore, creation fails with "User does not have CREATE CATALOG on Metastore". Say so and use the `remote_query` introspection below instead; it needs nothing extra.
 
 - **Name:** `<firstname><lastname>-<connection>`, with no epoch: like the connection, a foreign catalog is shared by many pipelines. If a catalog with that name exists for something else, append `-2`, `-3`. The name has hyphens, so quote it with backticks in SQL.
-- **Create.** Options per source: PostgreSQL and SQL Server `{"database": "<database>"}`; MySQL none (leave `options` out); Oracle `{"service_name": "<PDB>"}`, for example `FREEPDB1` (see the Oracle row in [query-based-connectors.md](query-based-pipeline.md#step-1--uc-connection)). Use `--json` only: `catalogs create` has no `--options` flag, and it rejects a positional name together with `--json`. When the connection's name already starts with `<firstname><lastname>` followed by `-` or `_` (the [default names](default-names.md) rule), the catalog is `<connection>-fc` (for example `janedoe-mysql-azvm-fc`), not the prefix twice.
+- **Create.** Options per source: PostgreSQL and SQL Server `{"database": "<database>"}`; MySQL none (leave `options` out); Oracle `{"service_name": "<PDB>"}`, for example `FREEPDB1` (see the Oracle row in [query-based-pipeline.md](query-based-pipeline.md#step-1--uc-connection)). Use `--json` only: `catalogs create` has no `--options` flag, and it rejects a positional name together with `--json`. When the connection's name already starts with `<firstname><lastname>` followed by `-` or `_` (the [default names](default-names.md) rule), the catalog is `<connection>-fc` (for example `janedoe-mysql-azvm-fc`), not the prefix twice.
 
 ```bash
 # PostgreSQL, SQL Server
@@ -182,7 +182,7 @@ With the column and key lists, write change scripts that exercise a pipeline: fo
 - **Tables without a key:** inserts only, or updates and deletes matched on all columns. Say that duplicate rows make these ambiguous.
 - **Dialect:** `LIMIT` (Postgres, MySQL) vs `TOP` (SQL Server); `now()` vs `SYSDATETIME()`; identifier quoting.
 
-**Running it:** the UC connection can't run DML (`remote_query` only runs queries). Give the user the script to run on the source, and say which tables and how many rows it touches. For Lakebase you're the project owner, so run it yourself with `databricks psql ... -f` (see the mutate step in [lakebase-as-postgres-source.md](lakebase-as-postgres-source.md)). After the next pipeline run, check that the changes arrived. SCD1 tables: the rows-per-run report in [troubleshooting-and-monitoring.md](rows-per-run.md#rows-per-table-per-run-snapshot-inserts-upserts-deletes) should show your inserts plus updates as `upserted` and your deletes as `deleted`. SCD2 tables: use the per-key count from the table in the same file, because the event-log counts for SCD2 aren't change counts. Also spot-check the rows you touched (the new keys exist, updated columns have the new values, deleted keys are gone or closed).
+**Running it:** the UC connection can't run DML (`remote_query` only runs queries). Give the user the script to run on the source, and say which tables and how many rows it touches. For Lakebase you're the project owner, so run it yourself with `databricks psql ... -f` (see the mutate step in [lakebase-as-postgres-source.md](lakebase-as-postgres-source.md)). After the next pipeline run, check that the changes arrived. SCD1 tables: the rows-per-run report in [rows-per-run.md](rows-per-run.md#rows-per-table-per-run-snapshot-inserts-upserts-deletes) should show your inserts plus updates as `upserted` and your deletes as `deleted`. SCD2 tables: use the per-key count from the table in the same file, because the event-log counts for SCD2 aren't change counts. Also spot-check the rows you touched (the new keys exist, updated columns have the new values, deleted keys are gone or closed).
 
 ---
 
@@ -190,7 +190,7 @@ With the column and key lists, write change scripts that exercise a pipeline: fo
 
 An unused slot holds WAL on the source until someone drops it, so create it as late as possible:
 
-1. **Pick the names, one pair per pipeline:** slot `<slot_name>` and publication `<slot_name>_pub`, where `<slot_name>` is `<base>_<epoch>` of this pipeline pair (see [Default names](default-names.md): the pipelines are `<base>_gw_<epoch>` / `<base>_ap_<epoch>`). Take it from the pipelines, never from the destination schema: the user may name the schema, and several pipelines can share one. For example slot `janedoe_my_pg_conn_1792351234` and publication `janedoe_my_pg_conn_1792351234_pub`. Run `action: list` to make sure neither name is taken. Put both in the ingestion pipeline's `source_configurations` → `postgres.slot_config` (`slot_name`, `publication_name`); see [database-connectors.md](postgresql-cdc.md#postgresql-cdc).
+1. **Pick the names, one pair per pipeline:** slot `<slot_name>` and publication `<slot_name>_pub`, where `<slot_name>` is `<base>_<epoch>` of this pipeline pair (see [Default names](default-names.md): the pipelines are `<base>_gw_<epoch>` / `<base>_ap_<epoch>`). Take it from the pipelines, never from the destination schema: the user may name the schema, and several pipelines can share one. For example slot `janedoe_my_pg_conn_1792351234` and publication `janedoe_my_pg_conn_1792351234_pub`. Run `action: list` to make sure neither name is taken. Put both in the ingestion pipeline's `source_configurations` → `postgres.slot_config` (`slot_name`, `publication_name`); see [postgresql-cdc.md](postgresql-cdc.md#pipelines).
 2. **Publication (the user runs it), before anything else exists:** give the user this statement, listing only this pipeline's tables, and wait for them to confirm. Then check it with `action: list`:
 
    ```sql

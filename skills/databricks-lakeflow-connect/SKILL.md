@@ -19,7 +19,7 @@ Build managed ingestion pipelines that pull from SaaS apps and databases into Un
 
 Managed connectors for ingesting data from SaaS applications and databases. The resulting ingestion pipeline is governed by Unity Catalog and powered by serverless compute and Lakeflow Spark Declarative Pipelines.
 
-There are five architecture patterns:
+There are five architecture patterns ([diagrams](references/architecture-patterns.md)):
 
 1. **SaaS pull** — reads an external SaaS via OAuth or API key into a streaming Delta table.
 2. **Integrated database CDC** (the default for CDC) — one pipeline reads the change log (SQL Server change tracking / CDC, MySQL binlog, Oracle redo log) inside each update. No separate gateway pipeline. Check the current docs for source support and compute ([integrated-cdc.md](references/integrated-cdc.md#integrated-cdc-default-vs-standard-cdc)).
@@ -43,7 +43,7 @@ Decide this before you build. Lakeflow Connect is the managed **pull** path for 
 | Lakebase Postgres as a stand-in for customer PostgreSQL in a **demo** | **Lakeflow Connect** (Postgres query-based) | this skill — [lakebase-as-postgres-source.md](references/lakebase-as-postgres-source.md) |
 | A partner offering a Delta share | Delta Sharing | — |
 
-Full reasoning, including the Federation-vs-Connect and Auto-Loader-vs-Connect trade-offs, is in [ingestion-decision-tree.md](references/ingestion-decision-tree.md).
+Federation-vs-Connect and Auto-Loader-vs-Connect reasoning: [ingestion-decision-tree.md](references/ingestion-decision-tree.md).
 
 ---
 
@@ -104,9 +104,7 @@ Not production-supported; check the [connector reference](https://docs.databrick
 
 **Same-name source tables** need a destination schema each, or a `destination_table`; pipeline create doesn't catch the clash ([integrated-cdc](references/integrated-cdc.md#where-each-table-lands-what-lfc-names-what-you-choose)).
 
-**Ask before creating anything.** Ask which source to ingest from if the user hasn't named one. For Postgres, offer an existing database or a Lakebase demo stand-in; never create a stand-in source yourself. Run the pre-flight checks in [query-based-connectors.md](references/query-based-connectors.md#pre-flight-checks-before-creating-the-pipeline-advise-the-product-doesnt-check) before a query-based pipeline. Ask for every missing input in one message, list what you'll create, and wait for one "yes". Then run the whole setup without asking again. Introspection and the full checklist: [prerequisite-checks.md](references/prerequisite-checks.md).
-
-**Before creating any pipeline,** confirm the checks in [prerequisite-checks.md](references/prerequisite-checks.md): a UC target catalog (not Default Storage for CDC), a UC `CONNECTION`, network reachability from the compute that reads the source, a monotonic cursor for query-based connectors, and OAuth scope grants for file connectors.
+**Ask before creating anything.** Ask which source to ingest from; for Postgres, offer an existing database or a Lakebase demo stand-in, and never create a stand-in yourself. Ask for every missing input in one message, list what you'll create, and wait for one "yes"; then run the whole setup without asking again. First confirm the checks in [prerequisite-checks.md](references/prerequisite-checks.md): a UC target catalog (not Default Storage for CDC), a UC `CONNECTION`, network reachability from the compute that reads the source, OAuth scope grants for file connectors, and for query-based the [pre-flight checks](references/query-based-connectors.md#pre-flight-checks-before-creating-the-pipeline-advise-the-product-doesnt-check).
 
 ---
 
@@ -121,10 +119,11 @@ Minimal JSON for `databricks pipelines create`, a DAB-authored version, and how 
 | File | When to read |
 |------|--------------|
 | [saas-connectors.md](references/saas-connectors.md) | SaaS connectors: per-connector deltas, OAuth, DAB stubs |
+| [architecture-patterns.md](references/architecture-patterns.md) | Why use LFC; a diagram per pattern |
 | [database-connectors.md](references/database-connectors.md) | Index of the database connector files |
 | [integrated-cdc.md](references/integrated-cdc.md) | Integrated CDC setup, source prerequisites, pipeline YAML, table mapping |
 | [integrated-cdc-updates.md](references/integrated-cdc-updates.md) | Integrated updates: smart closure, self-started updates, behaviors |
-| [standard-cdc-gateway.md](references/standard-cdc-gateway.md) | Standard (gateway) CDC: two pipelines, serverless-only gateway, gotchas |
+| [standard-cdc-gateway.md](references/standard-cdc-gateway.md) | Standard (gateway) CDC: two pipelines, the gateway's compute, gotchas |
 | [sql-server-cdc.md](references/sql-server-cdc.md) | SQL Server: change tracking vs CDC, `SCD_TYPE_2`, source table changes, setup |
 | [postgresql-cdc.md](references/postgresql-cdc.md) | PostgreSQL CDC: slot, publication, pipelines, gotchas; other preview connectors |
 | [compute-and-feature-gates.md](references/compute-and-feature-gates.md) | Serverless vs classic compute, what ran, workspace feature gates |
@@ -138,11 +137,11 @@ Minimal JSON for `databricks pipelines create`, a DAB-authored version, and how 
 | [lakebase-cdc.md](references/lakebase-cdc.md) | Trying Postgres CDC on Lakebase; cleanup if it fails |
 | [source-sql-through-connection.md](references/source-sql-through-connection.md) | Introspecting a source through a UC connection; test DML; replication slots |
 | [source-sql-notebook.md](references/source-sql-notebook.md) | The source SQL notebook and how to run it with `jobs submit` |
-| [database-source-behaviors.md](references/database-source-behaviors.md) | Shared database behaviors: destination checks, gateway compute, table limits |
-| [database-source-behaviors-postgresql.md](references/database-source-behaviors-postgresql.md) | PostgreSQL errors and fixes |
-| [database-source-behaviors-mysql.md](references/database-source-behaviors-mysql.md) | MySQL behaviors |
-| [database-source-behaviors-sql-server.md](references/database-source-behaviors-sql-server.md) | SQL Server behaviors |
-| [database-source-behaviors-oracle.md](references/database-source-behaviors-oracle.md) | Oracle grants, service names, archive logs, column types |
+| [database-source-behaviors.md](references/database-source-behaviors.md) | Docs troubleshooting pages per source; destination checks, gateway compute, table limits |
+| [database-source-behaviors-postgresql.md](references/database-source-behaviors-postgresql.md) | PostgreSQL slot, `wal_level`, replica identity, TLS |
+| [database-source-behaviors-mysql.md](references/database-source-behaviors-mysql.md) | MySQL binlog sessions and retention, dropped tables |
+| [database-source-behaviors-sql-server.md](references/database-source-behaviors-sql-server.md) | SQL Server grants, capture instances, governor limits |
+| [database-source-behaviors-oracle.md](references/database-source-behaviors-oracle.md) | Oracle grants, service names, archive logs, skipped tables |
 | [default-names.md](references/default-names.md) | Naming rules for pipelines, schemas, jobs, bundles, connections, slots |
 | [prerequisite-checks.md](references/prerequisite-checks.md) | Catalog, grants, connection and network checks; the confirmation list |
 | [anti-patterns.md](references/anti-patterns.md) | Wrong and right forms of the four most common mistakes |
@@ -173,7 +172,7 @@ Four forms that look plausible but fail. The wrong and right JSON and SQL: [anti
 ## Important
 
 - **Query-based and standard-CDC ingestion pipelines are triggered** — on a schedule or on demand. The standard-CDC gateway runs continuously from creation: stop it when you're done, since it bills and holds WAL. Integrated CDC has a continuous option; check its docs page.
-- **Compute-only billing** — DBUs, no per-row fee. Standard CDC adds an always-on gateway. Rates: the [pricing page](https://www.databricks.com/product/pricing/lakeflow-connect).
+- **Compute-only billing** — DBUs, no per-row fee; standard CDC adds an always-on gateway. Rates: the [pricing page](https://www.databricks.com/product/pricing/lakeflow-connect).
 - **Salesforce auth is OAuth U2M only** — no machine-to-machine or basic auth.
 - **Database staging retention is 30 days** by default for standard CDC. Integrated CDC stages in the volume set by `data_staging_options`; check its docs page for retention.
 - **Limits per pipeline** — most SaaS connectors cap at 250 tables per pipeline. Split across pipelines if needed.
@@ -182,35 +181,36 @@ Four forms that look plausible but fail. The wrong and right JSON and SQL: [anti
 ## Key Concepts
 
 - **UC `CONNECTION` is the credential anchor** — every pipeline points at a UC connection, which owns the auth.
-- **One pipeline, plus a gateway only for standard CDC** — compute for each: [compute-and-feature-gates.md](references/compute-and-feature-gates.md).
+- **One pipeline, plus a gateway only for standard CDC** — SaaS connectors are pure serverless; compute for database pipelines: [compute-and-feature-gates.md](references/compute-and-feature-gates.md).
 - **Query-based = cursor + latest state** — a run pulls rows whose cursor moved past the high-water mark. It sees the latest state of each changed row, misses hard deletes unless configured, and uses `deletion_condition` for soft deletes.
 - **CDC and schema evolution are built in** — changes are applied incrementally and the target schema evolves. Data-type changes typically require a full snapshot reload.
-- **Streaming Delta output** — destination tables are governed Delta tables; CDC sources apply with change semantics (`APPLY CHANGES` / AUTO CDC, or `apply_changes_from_snapshot` for snapshot sources).
+- **Streaming Delta output** — destination tables are governed Delta tables; CDC sources apply with change semantics (`APPLY CHANGES` / AUTO CDC, or `apply_changes_from_snapshot` for snapshot sources). Compatible with downstream materialized views and Spark streaming.
 - **OAuth U2M is UI-only** — DAB / CLI cannot bootstrap it. Hand the browser step to a human (Catalog Explorer > External Data > Connections > Create connection > pick the source > sign in), then resume once `databricks connections get <connection_name>` reports `READY`.
 
 ## Common Issues
 
-The workspace's own message is usually more current than the docs or this skill. After every create, deploy, and update:
+Error text, codes and limits change between releases, so the workspace's message and the current docs come before this skill. After every create, deploy, and update:
 
 1. **Read the full message:** the CLI or API error, the bundle deploy output (warnings included), and the `ERROR` and `WARN` events (`databricks pipelines list-pipeline-events <pipeline-id>`). Don't stop at `FAILED`.
-2. **Decide what it asks for:**
+2. **For a database source, read its docs troubleshooting page** (links per source in [database-source-behaviors.md](references/database-source-behaviors.md)), then the source's file in this skill.
+3. **Decide what it asks for:**
    - **A setting to change.** "You must use serverless compute in this workspace" means set `serverless: true` and redeploy. A `channel` or connector-type message means take the value it names.
    - **A missing grant**, for example "does not have CREATE CATALOG on Metastore". Report the privilege and who can grant it; don't work around it.
    - **A feature that isn't enabled**, for example "Ingestion source '<SOURCE>' is not supported in your workspace" ([feature gates](references/compute-and-feature-gates.md#workspace-feature-gates-all-database-sources)). Report it and offer the modes that work.
    - **A source-side fix:** network, credentials, or CDC setup on the database.
-3. **Fix that one thing, then retry the same step.** Change one thing at a time. When the error gives a way forward, take it and continue.
-4. **Clean up what a failed step left behind.** A failed `bundle deploy` can leave schemas: offer `bundle destroy` ([feature gates](references/compute-and-feature-gates.md#workspace-feature-gates-all-database-sources)). Report what's left and which errors the workspace showed.
+4. **Fix that one thing, then retry the same step.** When the error gives a way forward, take it and continue.
+5. **Clean up what a failed step left behind.** A failed `bundle deploy` can leave schemas: offer `bundle destroy`. Report what's left and which errors the workspace showed.
 
-For common errors and their fixes — duplicate-key violations, watermark / cursor problems, schema evolution, gateway region availability, the `channel` runtime-channel setting, and pipelines that run but land no data — see [troubleshooting-and-monitoring.md](references/troubleshooting-and-monitoring.md), which also has the event-log queries to diagnose them.
+Errors that follow from how the pipelines and sources work (duplicate keys, cursors, SCD2 counts, replication slots, change-log retention, dropped tables, table quotas), with the event-log queries to diagnose them: [troubleshooting-and-monitoring.md](references/troubleshooting-and-monitoring.md).
 
 ---
 
 ## Related Skills
 
-- **databricks-pipelines** — the SDP runtime these pipelines run on.
-- **databricks-zerobus-ingest** — push-based gRPC ingestion.
+- **databricks-pipelines** — the SDP runtime these pipelines run on. For Auto Loader and downstream pipeline patterns.
+- **databricks-zerobus-ingest** — push-based gRPC ingestion. Sibling to Lakeflow Connect's pull-based connectors.
 - **databricks-dabs** — author Lakeflow Connect pipelines as IaC.
-- **databricks-unity-catalog** — catalogs, schemas, and `CONNECTION` objects.
+- **databricks-unity-catalog** — managing catalogs, schemas, and the UC `CONNECTION` objects that LFC credentials live in.
 - **databricks-jobs** — schedule ingestion pipelines with `pipeline_task`.
 - **databricks-lakebase** — Lakebase projects and roles for a demo Postgres source; Lakehouse Sync for real Lakebase → UC ingestion.
 - **databricks-synthetic-data-gen** — generate realistic seed data for connector demos.

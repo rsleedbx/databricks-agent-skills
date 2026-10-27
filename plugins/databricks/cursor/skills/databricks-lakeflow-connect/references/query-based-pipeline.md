@@ -24,7 +24,7 @@ Per source:
 | SQL Server | `SQLSERVER` | A server with a self-signed certificate (a VM or container install) needs `"trustServerCertificate": "true"` in `options`, or every query fails with `FAILED_JDBC.CONNECTION`. Managed services don't. |
 | Oracle | `ORACLE` | `user` in uppercase (`C##LFC_USER` for a common user). `"service_name"`: the root container's service in a multi-tenant database, which is the CDB's name (`FREE` on Oracle Free, not the literal `CDB$ROOT`, which the listener doesn't serve); integrated CDC refuses a connection without it (`Missing service_name option in the connection`). Pipelines on it reach the PDB through `source_catalog` (query-based and integrated CDC). SQL through the connection (`remote_query`, Step 0) runs in the connection's service and ignores a `service_name =>` argument, so for the PDB's tables add a second connection with `"service_name": "<PDB>"`. Find the services with `lsnrctl status`. |
 
-Use a dedicated, read-only database user. Requires `CREATE CONNECTION` on the metastore. Grant `USE CONNECTION` to whoever creates the pipeline if that is a different principal. Check the connection with a Step 0 query before building the pipeline: `FAILED_JDBC.CONNECTION ... Failed to connect to the database` is the network path or, on SQL Server, the certificate.
+Use a dedicated, read-only database user. Requires `CREATE CONNECTION` on the metastore. Grant `USE CONNECTION` to whoever creates the pipeline if that is a different principal. Check the connection with a Step 0 query ([query-based-discovery.md](query-based-discovery.md)) before building the pipeline: `FAILED_JDBC.CONNECTION ... Failed to connect to the database` is the network path or, on SQL Server, the certificate.
 
 Source-side grants (Postgres):
 
@@ -82,7 +82,7 @@ resources:
 
 Keep scratch files (the Step 0 discovery `.sql` files, report queries) out of the bundle directory, for example in a `queries/` folder listed under `sync.exclude`. Otherwise `bundle deploy` uploads them to the workspace.
 
-The pipeline is serverless by default: leave `serverless` out of the bundle, and read back what it ran on ([database-connectors.md](compute-and-feature-gates.md#compute-serverless-or-classic)). Classic compute is Beta (`serverless: false` plus a `clusters` block); prefer serverless.
+The pipeline is serverless by default: leave `serverless` out of the bundle, and read back what it ran on ([compute-and-feature-gates.md](compute-and-feature-gates.md#compute-serverless-or-classic)). Classic compute is Beta (`serverless: false` plus a `clusters` block); prefer serverless.
 
 **Foreign catalog variant** — if the source is already a Lakehouse Federation foreign catalog, set `ingest_from_uc_foreign_catalog: true` under `ingestion_definition`, and set `source_catalog` to the foreign catalog name. `primary_keys` is required unless `scd_type` is `APPEND_ONLY`.
 

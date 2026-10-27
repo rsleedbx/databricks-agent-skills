@@ -197,7 +197,7 @@ databricks connections create --json @conn.json --profile <PROFILE>
 rm -f conn.json
 ```
 
-If the connection name is already taken, don't delete or reuse that connection: it may be a coworker's. Pick a new connection name (for example append `-2`) and re-run `role.sql` with it and `-v rotate=yes` (this demo's own role, created a moment ago), then create again.
+If the connection name is already taken, don't delete or reuse that connection: it may be a coworker's. Pick a new connection name (for example append `-2`) and re-run `role.sql` with it and `-v rotate=yes` (this demo's own role, created a moment ago), then create again. From here on, `<connection-name>` is the name you created, suffix included: use it in the bundle and in the teardown, never the name that was taken.
 
 Lakebase requires TLS. Test the connection with a quick Federation query or `databricks connections get <connection-name>` before building the pipeline.
 
@@ -241,7 +241,7 @@ resources:
       catalog: ${var.catalog}
       schema: <target_schema>
       ingestion_definition:
-        connection_name: <firstname><lastname>-<base>-lakebase
+        connection_name: <connection-name>   # the name Step 4 created
         objects:
           - table:
               source_catalog: databricks_postgres
@@ -322,7 +322,7 @@ SELECT status, count(*) FROM <catalog>.<target_schema>.orders GROUP BY status;
 SELECT * FROM <catalog>.<target_schema>.orders WHERE order_id = 200;   -- 0 rows
 ```
 
-Then show what each run did, per table: run the **Rows per table per run** query in [troubleshooting-and-monitoring.md](rows-per-run.md#rows-per-table-per-run-snapshot-inserts-upserts-deletes). Get the pipeline ID from `databricks bundle summary -t dev --var catalog=<catalog> -o json --profile <PROFILE>` (`resources.pipelines.lakebase_qbc.id`). For this demo, run 1 should show `snapshot` with 1,000 customers and 10,000 orders under `snapshot_inserted`. Run 2 should be `incremental`: `orders` shows about 100 upserts and 1 delete, matching the mutations above. It can be a few more than 100, because a timestamp cursor re-reads a short lookback window before the high-water mark; that's expected, not a pipeline problem. Put the counts next to the mutations so the audience can see each change arrive. If an SCD2 count (`customers`) is higher than the number of changes, say it's the connector's merge count, not the number of source changes.
+Then show what each run did, per table: run the **Rows per table per run** query in [rows-per-run.md](rows-per-run.md#rows-per-table-per-run-snapshot-inserts-upserts-deletes). Get the pipeline ID from `databricks bundle summary -t dev --var catalog=<catalog> -o json --profile <PROFILE>` (`resources.pipelines.lakebase_qbc.id`). For this demo, run 1 should show `snapshot` with 1,000 customers and 10,000 orders under `snapshot_inserted`. Run 2 should be `incremental`: `orders` shows about 100 upserts and 1 delete, matching the mutations above. It can be a few more than 100, because a timestamp cursor re-reads a short lookback window before the high-water mark; that's expected, not a pipeline problem. Put the counts next to the mutations so the audience can see each change arrive. If an SCD2 count (`customers`) is higher than the number of changes, say it's the connector's merge count, not the number of source changes.
 
 **Talking points:** no CDC setup on the source; one serverless pipeline; the cursor and lookback window; QBC captures latest state per run, not every intermediate change — that's what the CDC connector adds.
 
@@ -333,7 +333,7 @@ Then show what each run did, per table: run the **Rows per table per run** query
 ```bash
 databricks bundle destroy -t dev --var catalog=<catalog> --profile <PROFILE>
 databricks schemas delete <catalog>.<target_schema> --force --profile <PROFILE>   # created in Step 5, not by the bundle
-databricks connections delete "<firstname><lastname>-<base>-lakebase" --profile <PROFILE>
+databricks connections delete "<connection-name>" --profile <PROFILE>   # the name Step 4 created
 rm -f conn.json
 ```
 

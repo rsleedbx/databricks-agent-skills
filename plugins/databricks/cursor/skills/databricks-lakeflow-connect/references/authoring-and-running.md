@@ -1,6 +1,6 @@
 # Authoring and running a pipeline
 
-The minimal `ingestion_definition` for `databricks pipelines create --json`, the DAB-authored form, and the commands to run and poll an update. The SaaS and database forms are in the files named in [SKILL.md](../SKILL.md#reference-index).
+The minimal `ingestion_definition` for `databricks pipelines create --json`, the DAB-authored form, and the commands to run and poll an update. The SaaS and database forms are in the files named in [SKILL.md](../SKILL.md#detailed-guides).
 
 ## Minimal Example — Salesforce ingestion pipeline
 

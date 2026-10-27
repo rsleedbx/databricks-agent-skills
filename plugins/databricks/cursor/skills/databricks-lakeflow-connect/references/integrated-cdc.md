@@ -33,9 +33,9 @@ From the page, check: release stage, whether it needs `channel: PREVIEW`, whethe
 The source setup is the same as for standard CDC:
 
 - **SQL Server:** CDC or change tracking enabled on each table ([sql-server-cdc.md](sql-server-cdc.md#sql-server-change-tracking-vs-cdc)), on the **primary** instance (no read replicas). SCD Type 2 needs CDC, not change tracking.
-- **MySQL:** binary log on, with `binlog_format=ROW` and `binlog_row_image=FULL`. Gateway connections, snapshot limits and deletes: [database-source-behaviors-mysql.md](database-source-behaviors-mysql.md).
+- **MySQL:** binary log on, with `binlog_format=ROW` and `binlog_row_image=FULL`. Binlog sessions and retention: [database-source-behaviors-mysql.md](database-source-behaviors-mysql.md).
 
-Check through the existing connection with `remote_query` (read-only), using the same `--file` pattern as Step 0 in [query-based-connectors.md](query-based-connectors.md):
+Check through the existing connection with `remote_query` (read-only), using the same `--file` pattern as Step 0 in [query-based-discovery.md](query-based-discovery.md):
 
 ```sql
 -- SQL Server: per-table CDC / change tracking status in one database
@@ -52,7 +52,7 @@ SELECT * FROM remote_query('<connection>', database => '<database>', query => "
 SELECT * FROM remote_query('<connection>', query => "SELECT @@log_bin AS log_bin, @@binlog_format AS binlog_format, @@binlog_row_image AS binlog_row_image")
 ```
 
-**TLS on the connection.** The CDC extractor enforces TLS. On MySQL, query-based ingestion through the same connection works without a trusted certificate and only CDC fails; on SQL Server, every query fails too (`FAILED_JDBC.CONNECTION`, see the connection table in [query-based-connectors.md](query-based-connectors.md)). A source with a self-signed certificate (a VM or container install of MySQL or SQL Server) fails at the start of the update: `Extractor FAILED`, with `INGESTION_GATEWAY_CONNECTION_ERROR.TLS_VALIDATION_FAILURE ... TLS is enforced but no server certificate provided. Provide a server certificate or set trustServerCertificate=true`. Add `"trustServerCertificate": "true"` to the connection's options with `databricks connections update <connection> --json @opts.json` (pass every option, including the password, from a private file), then start a new update. Managed services with trusted certificates don't need it.
+**TLS on the connection.** The CDC extractor enforces TLS. On MySQL, query-based ingestion through the same connection works without a trusted certificate and only CDC fails; on SQL Server, every query fails too (`FAILED_JDBC.CONNECTION`, see the connection table in [query-based-pipeline.md](query-based-pipeline.md#step-1--uc-connection)). A source with a self-signed certificate (a VM or container install of MySQL or SQL Server) fails at the start of the update: `Extractor FAILED`, with `INGESTION_GATEWAY_CONNECTION_ERROR.TLS_VALIDATION_FAILURE ... TLS is enforced but no server certificate provided. Provide a server certificate or set trustServerCertificate=true`. Add `"trustServerCertificate": "true"` to the connection's options with `databricks connections update <connection> --json @opts.json` (pass every option, including the password, from a private file), then start a new update. Managed services with trusted certificates don't need it.
 
 A table with neither CDC nor change tracking can't be ingested with CDC: enable it at the source (ask first; it's a change to the customer's database), or use query-based for that table.
 
@@ -86,7 +86,7 @@ resources:
           schema_name: <name>_staging   # create it with the destination schema
 ```
 
-On a serverless-only workspace, integrated CDC on SQL Server (change tracking on a table with a primary key, SQL Server CDC on one without), MySQL and Oracle (`channel: PREVIEW`, `serverless: true`, each object's `source_catalog` = the PDB, with the connection's `service_name` = the CDB's service; see [query-based-pipeline.md](query-based-pipeline.md) Step 1) takes the snapshot, then applies inserts, updates, and deletes while the update is still running. Tables without a primary key end up with the same rows as the source.
+On a serverless-only workspace, integrated CDC on SQL Server (change tracking on a table with a primary key, SQL Server CDC on one without), MySQL and Oracle (`channel: PREVIEW`, `serverless: true`, each object's `source_catalog` = the PDB, with the connection's `service_name` = the CDB's service; see [query-based-pipeline.md](query-based-pipeline.md) Step 1) takes the snapshot, then applies inserts, updates, and deletes while the update is still running. Tables without a primary key are keyed on all columns ([updates](integrated-cdc-updates.md#behavior-that-doesnt-change-between-releases)).
 
 For MySQL, address tables by `source_schema: <mysql-database>` with no `source_catalog`; `channel` is optional (default `CURRENT`). The MySQL page lists classic compute. A serverless-only workspace refuses classic ("You must use serverless compute in this workspace"), and `serverless: true` runs. The example leaves `serverless` out, as everywhere: add `serverless: true` only when the workspace asks for it, as that one did.
 
@@ -111,7 +111,7 @@ For MySQL, address tables by `source_schema: <mysql-database>` with no `source_c
 
 **Clean up** an integrated CDC pipeline in this order: delete the pipeline (`databricks bundle destroy`, or `databricks pipelines delete <pipeline-id>`), then both schemas, which also removes the staging volume: `databricks schemas delete <catalog>.<name> --force` and `databricks schemas delete <catalog>.<name>_staging --force`. The bundle doesn't own schemas you created by hand, so `bundle destroy` leaves them.
 
-Deleting an integrated MySQL pipeline drops its destination tables, and a PostgreSQL slot the pipeline named stays after the delete: [MySQL](database-source-behaviors-mysql.md) and [PostgreSQL](database-source-behaviors-postgresql.md).
+Deleting a pipeline drops its destination tables: copy them out first if they're needed.
 
 ### Where each table lands: what LFC names, what you choose
 
@@ -125,7 +125,7 @@ LFC names the destination tables; you choose where they go. That split decides w
 | Two source tables with the same name (`sales.orders`, `finance.orders`) | nothing: it doesn't rename a clash | a different `destination_schema` for each (or two schema objects, one per source schema), or a `destination_table` for one |
 | Staging volume | created in the staging (or destination) schema | `data_staging_options`, to choose the schema |
 
-Two same-name tables in one pipeline work when each goes to its own destination schema or name. On SQL Server (two destination schemas, two schema objects, or a rename in one schema; both CDC modes; change tracking and CDC), each destination keeps only its own source's rows and changes. The SQL Server and PostgreSQL limits pages say two same-name tables can't share a pipeline. The [MySQL limits page](https://docs.databricks.com/ingestion/lakeflow-connect/mysql-limits) states the rule: not into the **same** destination schema.
+Two same-name tables in one pipeline work when each goes to its own destination schema or name: each destination keeps only its own source's rows and changes. The [MySQL limits page](https://docs.databricks.com/ingestion/lakeflow-connect/mysql-limits) states the rule: not into the **same** destination schema. Check the source's limits page for its current wording.
 
 Pipeline create doesn't check the mapping, so check it before deploying:
 

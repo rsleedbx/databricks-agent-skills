@@ -39,13 +39,16 @@ flow_rows AS (
   --   query-based hard-delete tracking: <catalog>.<schema>.<catalog>_<schema>_<table>_delete (counted into <table>)
   -- Skips _staging, extractor_*, cdc_staging_table, and internal timing-only flows.
   -- Note: if flow names use hyphens or backticks, the prefix pattern may not match and they show as "full load".
-  --       Inspect origin.flow_name in the raw event log to see the actual pattern, then adapt the regex.
+  --       Inspect origin.flow_name in the raw event log to see the actual pattern, then adapt the patterns.
   SELECT origin.update_id, origin.flow_name,
-         CASE WHEN origin.flow_name RLIKE '.+_(snapshot|cdc)_flow$'
-              THEN regexp_extract(origin.flow_name, '^.+\\.([^_.]+)(?:_(?:snapshot|cdc)_flow)?(?:_upsert)?$', 1)
-              WHEN origin.flow_name RLIKE '.+_(?:upsert|delete)$'
-              THEN regexp_extract(origin.flow_name, '^.+\\.([^_.]+)(?:_upsert|_delete)?$', 1)
-              ELSE regexp_extract(origin.flow_name, '([^.]+)$', 1) END AS tbl,
+         -- the table: the last name part, without the [applier_]<catalog>_<schema>_ prefix and the flow suffix
+         CASE WHEN element_at(split(origin.flow_name, '\\.'), 3) RLIKE concat('^(applier_)?',
+                     element_at(split(origin.flow_name, '\\.'), 1), '_', element_at(split(origin.flow_name, '\\.'), 2), '_')
+              THEN regexp_replace(regexp_replace(element_at(split(origin.flow_name, '\\.'), 3),
+                     concat('^(applier_)?', element_at(split(origin.flow_name, '\\.'), 1), '_',
+                            element_at(split(origin.flow_name, '\\.'), 2), '_'), ''),
+                     '_(snapshot_flow|cdc_flow|upsert|delete)$', '')
+              ELSE element_at(split(origin.flow_name, '\\.'), 3) END AS tbl,
          origin.flow_name RLIKE '\\.applier_' AS is_integrated,
          CASE WHEN NOT origin.flow_name RLIKE '^([^.]+)\\.([^.]+)\\.(applier_)?\\1_\\2_.+$' THEN 'full load'
               WHEN origin.flow_name LIKE '%\\_snapshot\\_flow' THEN 'cdc snapshot'
