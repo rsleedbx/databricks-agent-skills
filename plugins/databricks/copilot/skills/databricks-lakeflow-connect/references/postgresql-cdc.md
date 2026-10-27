@@ -114,6 +114,6 @@ Using Lakebase as the Postgres source for a demo: see [lakebase-as-postgres-sour
 
 Use the [connector reference](https://docs.databricks.com/ingestion/lakeflow-connect/) for current setup steps:
 
-- **MySQL CDC**: the integrated CDC pipeline (GA, no gateway) is the default ([integrated-cdc.md](integrated-cdc.md), [docs](https://docs.databricks.com/ingestion/lakeflow-connect/mysql-integrated-pipeline)); the gateway-based pattern is Public Preview. Binlog replaces CT/CDC.
-- **Oracle / Teradata / SQL Server / Postgres / MySQL / MariaDB query-based** (GA): no gateway; see [query-based-connectors.md](query-based-connectors.md).
+- **MySQL CDC**: the integrated CDC pipeline (GA, no separate gateway pipeline) is the default ([integrated-cdc.md](integrated-cdc.md), [docs](https://docs.databricks.com/ingestion/lakeflow-connect/mysql-integrated-pipeline)); the gateway-based pattern is Public Preview. Binlog replaces CT/CDC.
+- **Oracle / Teradata / SQL Server / Postgres / MySQL / MariaDB query-based** (GA): no separate gateway pipeline; see [query-based-connectors.md](query-based-connectors.md).
 - **Snowflake / Redshift / Synapse / BigQuery (Foreign Catalog)** (GA): you create the foreign catalog with Lakehouse Federation; Lakeflow Connect reads through it and materializes the queried subset to Delta. Most useful for warehouse-to-lakehouse migration scenarios.

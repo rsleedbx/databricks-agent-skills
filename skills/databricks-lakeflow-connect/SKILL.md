@@ -22,9 +22,9 @@ Managed connectors for ingesting data from SaaS applications and databases. The 
 There are five architecture patterns:
 
 1. **SaaS pull** — reads an external SaaS via OAuth or API key into a streaming Delta table.
-2. **Integrated database CDC** (the default for CDC) — one pipeline reads the change log (SQL Server change tracking / CDC, MySQL binlog, Oracle redo log) inside each update. No gateway. Check the current docs for source support and compute ([integrated-cdc.md](references/integrated-cdc.md#integrated-cdc-default-vs-standard-cdc)).
+2. **Integrated database CDC** (the default for CDC) — one pipeline reads the change log (SQL Server change tracking / CDC, MySQL binlog, Oracle redo log) inside each update. No separate gateway pipeline. Check the current docs for source support and compute ([integrated-cdc.md](references/integrated-cdc.md#integrated-cdc-default-vs-standard-cdc)).
 3. **Standard database CDC via gateway** — only when the user asks for standard or gateway CDC, or the source has no integrated CDC. An always-on gateway stages changes in a UC Volume ([standard-cdc-gateway.md](references/standard-cdc-gateway.md)).
-4. **Query-based** — for sources without CDC (Oracle / Teradata / SQL Server / PG / MySQL / MariaDB, or a Federation foreign catalog): one serverless pipeline pulls rows past a cursor's high-water mark each run. No gateway.
+4. **Query-based** — for any of these sources, with or without CDC (Oracle / Teradata / SQL Server / PG / MySQL / MariaDB, or a Federation foreign catalog): one serverless pipeline pulls rows past a cursor's high-water mark each run. No separate gateway pipeline.
 5. **Community connectors** — template-based, out of scope for this skill.
 
 ---
@@ -67,8 +67,8 @@ Full coverage in this skill, except rows whose Reference is a public docs page.
 | Dynamics 365 | SaaS pull (via Azure Synapse Link) | OAuth U2M | [Dynamics 365 connector docs](https://docs.databricks.com/ingestion/lakeflow-connect/d365) |
 | SQL Server (cloud) | Database CDC: integrated (default) or standard (gateway) | DB user + change tracking / CDC | [sql-server-cdc.md](references/sql-server-cdc.md) |
 | SQL Server (on-prem) | Database CDC | DB user + ExpressRoute / Direct Connect | [sql-server-cdc.md](references/sql-server-cdc.md) |
-| MySQL (integrated CDC pipeline, no gateway) | Database CDC: integrated | DB user + binlog | [integrated-cdc.md](references/integrated-cdc.md) |
-| Oracle / Teradata / SQL Server / PG / MySQL / MariaDB (query-based) | Database query, serverless, no gateway | Read-only DB user + cursor column | [query-based-connectors.md](references/query-based-connectors.md) |
+| MySQL (integrated CDC pipeline, no separate gateway pipeline) | Database CDC: integrated | DB user + binlog | [integrated-cdc.md](references/integrated-cdc.md) |
+| Oracle / Teradata / SQL Server / PG / MySQL / MariaDB (query-based) | Database query, serverless, no separate gateway pipeline | Read-only DB user + cursor column | [query-based-connectors.md](references/query-based-connectors.md) |
 | Snowflake / Redshift / Synapse / BigQuery (Foreign Catalog) | Database query | Foreign Catalog | [query-based-connectors.md](references/query-based-connectors.md) |
 
 ### Public Preview connectors
