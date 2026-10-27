@@ -23,8 +23,6 @@ Per source:
 | `Extractor FAILED` with `INGESTION_GATEWAY_CONNECTION_ERROR.INCORRECT_SOURCE_HOSTNAME_OR_PORT_SPECIFIED_FAILURE`: "Could not connect to the source database" | Classic gateway, and the source's firewall allows only the serverless ranges | Allow the workspace's classic egress IP at the source. It isn't in the published serverless ranges. Or set `serverless: true`. |
 | No instances start | Classic standard gateway stays `PENDING` at "Finding instances" | Ask a workspace admin for a node type the workspace has capacity for, or run the gateway on serverless. |
 | `You are not authorized to create instance pools` | Creating an instance pool as a non-admin | Ask a workspace admin for instance-pool permission, or run the gateway on serverless. |
-| The update fails at start: `_LEGACY_ERROR_TEMP_84_FAILED_TO_PARSE_PIPELINE_CONF` with `CLUSTER_SETUP_FAILURE.EXECUTION_SERVICE_INITIALIZATION_FAILED` on each cluster. No tables are created. | `pipelines.gateway.realtime.maxConnections` set to a non-numeric value (such as `abc`) | Set an integer. |
-| Accepted with no error, and the update completes | `pipelines.gateway.realtime.maxConnections` out of range (-1, 0, 100000) | Set a positive integer sized for the source's connection limit. |
 
 ## Table limits
 
