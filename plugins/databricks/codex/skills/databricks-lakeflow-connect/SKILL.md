@@ -102,7 +102,7 @@ Not production-supported; check the [connector reference](https://docs.databrick
 
 **Names.** Ask the user for names; for a demo or test without them, one `<base>_<epoch>` for the pipeline, schema, job and bundle. Rules and the limits that hold for any name: [default names](references/prerequisite-checks.md#default-names).
 
-**Same-name source tables** need a destination schema each, or a `destination_table`; pipeline create doesn't catch the clash ([integrated-cdc](references/integrated-cdc.md#where-each-table-lands-what-lfc-names-what-you-choose)).
+**Where tables land and same-name tables:** [integrated-cdc.md](references/integrated-cdc.md#where-each-table-lands-what-lfc-names-what-you-choose).
 
 **Ask before creating anything.** Ask which source to ingest from; for Postgres, offer an existing database or a Lakebase demo stand-in, and never create a stand-in yourself. Ask for every missing input in one message, list what you'll create, and wait for one "yes"; then run the whole setup without asking again. First confirm the checks in [prerequisite-checks.md](references/prerequisite-checks.md): a UC target catalog (not Default Storage for CDC), a UC `CONNECTION`, network reachability from the compute that reads the source, and for query-based the [pre-flight checks](references/query-based-connectors.md#pre-flight-checks-before-creating-the-pipeline-advise-the-product-doesnt-check).
 
@@ -125,14 +125,11 @@ Minimal JSON for `databricks pipelines create`, a DAB-authored version, and how 
 | [postgresql-cdc.md](references/postgresql-cdc.md) | PostgreSQL CDC: slot, publication, pipelines, gotchas; slot, `wal_level`, replica identity and TLS errors |
 | [compute-and-feature-gates.md](references/compute-and-feature-gates.md) | Serverless vs classic compute, what ran, workspace feature gates |
 | [query-based-connectors.md](references/query-based-connectors.md) | Query-based concepts: cursors, run behavior, shape table, pre-flight |
-| [query-based-discovery.md](references/query-based-discovery.md) | Finding tables, keys, and cursor candidates through a connection |
-| [query-based-pipeline.md](references/query-based-pipeline.md) | Query-based connection, pipeline, schedule, networking, gotchas |
+| [query-based-pipeline.md](references/query-based-pipeline.md) | Query-based: finding tables, keys and cursors; connection, pipeline, schedule, networking, gotchas |
 | [troubleshooting-and-monitoring.md](references/troubleshooting-and-monitoring.md) | Event-log queries, runtime per update, common errors |
 | [rows-per-run.md](references/rows-per-run.md) | Rows per table per run: [`scripts/rows_per_run.sql`](scripts/rows_per_run.sql), column meanings, SCD2 counts |
-| [lakebase-as-postgres-source.md](references/lakebase-as-postgres-source.md) | Lakebase as a demo Postgres source, end to end |
-| [lakebase-cdc.md](references/lakebase-cdc.md) | Trying Postgres CDC on Lakebase; cleanup if it fails |
-| [source-sql-through-connection.md](references/source-sql-through-connection.md) | Introspecting a source through a UC connection; test DML; replication slots |
-| [source-sql-notebook.md](references/source-sql-notebook.md) | The source SQL notebook and how to run it with `jobs submit` |
+| [lakebase-as-postgres-source.md](references/lakebase-as-postgres-source.md) | Lakebase as a demo Postgres source, end to end; trying Postgres CDC on Lakebase |
+| [source-sql-through-connection.md](references/source-sql-through-connection.md) | Introspecting a source through a UC connection; test DML; replication slots; the source SQL notebook |
 | [database-source-behaviors.md](references/database-source-behaviors.md) | Docs troubleshooting pages per source; destination checks, gateway compute, table limits; MySQL and Oracle errors |
 | [prerequisite-checks.md](references/prerequisite-checks.md) | Catalog, grants, connection and network checks; default names for demos and tests |
 | [anti-patterns.md](references/anti-patterns.md) | Wrong and right forms of the four most common mistakes |

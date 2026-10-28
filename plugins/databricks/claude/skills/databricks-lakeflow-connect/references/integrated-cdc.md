@@ -35,7 +35,7 @@ The source setup is the same as for standard CDC:
 - **SQL Server:** CDC or change tracking enabled on each table ([sql-server-cdc.md](sql-server-cdc.md#sql-server-change-tracking-vs-cdc)), on the **primary** instance (no read replicas). SCD Type 2 needs CDC, not change tracking.
 - **MySQL:** binary log on, with `binlog_format=ROW` and `binlog_row_image=FULL`. Binlog sessions and retention: [MySQL behaviors](database-source-behaviors.md#mysql).
 
-Check through the existing connection with `remote_query` (read-only), using the same `--file` pattern as Step 0 in [query-based-discovery.md](query-based-discovery.md):
+Check through the existing connection with `remote_query` (read-only), using the same `--file` pattern as Step 0 in [query-based discovery](query-based-pipeline.md#step-0--find-the-source-tables-through-the-connection):
 
 ```sql
 -- SQL Server: per-table CDC / change tracking status in one database

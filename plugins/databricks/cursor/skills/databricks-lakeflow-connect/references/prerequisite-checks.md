@@ -2,12 +2,12 @@
 
 Checks to run before any Lakeflow Connect pipeline is created. Asking first, and the short list: [SKILL.md](../SKILL.md#prerequisites).
 
-**Where tables land:** every object needs its `destination_catalog` and `destination_schema`; source tables keep their names, and two with the same name clash without an error at create: [integrated-cdc.md](integrated-cdc.md#where-each-table-lands-what-lfc-names-what-you-choose).
+**Where tables land, and same-name tables:** [integrated-cdc.md](integrated-cdc.md#where-each-table-lands-what-lfc-names-what-you-choose).
 
 **Before you ask for the inputs:**
 
 - **Postgres:** offer an existing database (host, port, database, read-only user), or a Lakebase demo stand-in, which runs end to end with [lakebase-as-postgres-source.md](lakebase-as-postgres-source.md) (its Step 0 lists the inputs to collect).
-- **An existing UC connection but no tables named:** list them first with Step 0 of [query-based-discovery.md](query-based-discovery.md), and propose tables from what you find. For full detail, introspect the whole database in one shot with [source-sql-through-connection.md](source-sql-through-connection.md) (all columns in one query, all keys and indexes in another, never table by table). If the connection sees more than one database, ask which one.
+- **An existing UC connection but no tables named:** list them first with [Step 0](query-based-pipeline.md#step-0--find-the-source-tables-through-the-connection), and propose tables from what you find. For full detail, introspect the whole database in one shot with [source-sql-through-connection.md](source-sql-through-connection.md) (all columns in one query, all keys and indexes in another, never table by table). If the connection sees more than one database, ask which one.
 - **Query-based:** run the [pre-flight checks](query-based-connectors.md#pre-flight-checks-before-creating-the-pipeline-advise-the-product-doesnt-check): the product doesn't verify that a declared key is unique, that the cursor is indexed, or that it has no NULLs. Report what you find, and let the user skip it (for example for a snapshot or a test).
 - **The plan** lists what you'll create: source, UC connection, target schema, pipeline, job.
 

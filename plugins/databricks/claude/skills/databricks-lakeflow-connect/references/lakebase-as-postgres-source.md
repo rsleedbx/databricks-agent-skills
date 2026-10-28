@@ -7,7 +7,7 @@ Lakebase is real Postgres, so it can stand in for a customer's external PostgreS
 | Connector | Lakebase status |
 |---|---|
 | Postgres **query-based** | Works today. Follow this page. |
-| Postgres **CDC** (gateway) | Rolling out. Try creating the publication ([lakebase-cdc.md](lakebase-cdc.md)); if it fails, use query-based. |
+| Postgres **CDC** (gateway) | Rolling out. Try creating the publication ([Lakebase CDC](#postgres-cdc-on-lakebase-try-it-then-fall-back)); if it fails, use query-based. |
 
 For Lakebase basics (projects, branches, endpoints, `databricks postgres` / `databricks psql`), load **databricks-lakebase** first.
 
@@ -25,7 +25,7 @@ Collect these before running any create command. Use what the user already gave 
 | Target schema | `<name>`, the same as the pipeline (unique, so two people's demos in one catalog don't write the same tables). Examples below write `<target_schema>`. |
 | Postgres schema for this demo (also names the role and connection) | `<base>` (e.g. `mydb`): drives the role `<base>_reader` and connection `<firstname><lastname>-<base>-lakebase` |
 | Pipeline, schema, job, and bundle name | `<name>` = `<firstname><lastname>_<connection>_<epoch>` (e.g. `janedoe_mydb_lakebase_1792351234`); see [Default names](prerequisite-checks.md#default-names) |
-| Connector | query-based (Lakebase CDC: see [lakebase-cdc.md](lakebase-cdc.md)) |
+| Connector | query-based (Lakebase CDC: see [Lakebase CDC](#postgres-cdc-on-lakebase-try-it-then-fall-back)) |
 | Seed the `<base>` tables from Step 3 | yes |
 | Schedule job | no (run on demand) |
 
@@ -351,3 +351,38 @@ DROP ROLE :"rolname";
 ```
 
 Keep the `lfc-demo` project by default, since other demos reuse it; drop only this demo's schema and role. Delete the project only if the user asks. `databricks postgres delete-project` is a soft delete: the project name stays reserved for about 7 days, so the next demo needs a different name.
+
+---
+
+## Postgres CDC on Lakebase: try it, then fall back
+
+Whether a Lakebase instance can run Postgres CDC, and what to clean up if the attempt fails.
+
+Lakebase support for publications and replication slots is being rolled out, and there's no fixed date. Don't assume either way: when the user asks for Postgres CDC on Lakebase, **try creating this demo's publication**. If that fails, CDC can't run on this Lakebase yet. Tell the user and use query-based.
+
+You're connected as the project owner through `databricks psql`, so you can run DDL directly here (unlike an external source behind a UC connection). Save the probe as `probe.sql` and run it as one `-f` file:
+
+```bash
+databricks psql --project <project-id> --profile <PROFILE> -- \
+  -X -v ON_ERROR_STOP=1 -v base=<base> -v slot_name="<slot_name>" -f probe.sql
+```
+
+```sql
+SHOW wal_level;
+SELECT rolreplication FROM pg_roles WHERE rolname = current_user;
+SELECT :'slot_name' || '_pub' AS pubname \gset
+CREATE PUBLICATION :"pubname" FOR TABLE :"base".customers, :"base".orders;
+```
+
+How to read the result:
+
+- **The `CREATE PUBLICATION` fails** with "[Databricks Auth] CREATE PUBLICATION is not enabled on this Lakebase instance": CDC isn't available on this Lakebase yet, even though `wal_level` is `logical` and the role has `REPLICATION` (both are true on current Lakebase). Use query-based. Nothing was created.
+- **It succeeds:** keep the publication and continue with the Postgres CDC section in [postgresql-cdc.md](postgresql-cdc.md). `<slot_name>` is the pipeline pair's `<base>_<epoch>` (the pipelines are `<base>_gw_<epoch>` / `<base>_ap_<epoch>`; see [Default names](prerequisite-checks.md#default-names)). The publication is `<slot_name>_pub`. Set `REPLICA IDENTITY FULL` on both tables (`ALTER TABLE <base>.customers REPLICA IDENTITY FULL;`, the same for `<base>.orders`). Then deploy the pipelines, stop the gateway (it starts on deploy), create the slot with `SELECT pg_create_logical_replication_slot('<slot_name>', 'pgoutput');`, and start the gateway, the same order as in [postgresql-cdc.md](postgresql-cdc.md). If the slot or the pipelines fail, clean up in this order: `bundle destroy` (or delete this attempt's pipelines) so the gateway stops reading, then drop this attempt's slot and publication by name (`SELECT pg_drop_replication_slot('<slot_name>');`, `DROP PUBLICATION <slot_name>_pub;`), check that both are gone, report anything left, and fall back to query-based.
+
+Lakebase-specific checks once CDC works:
+
+- **Leave Lakebase's own slots alone** (for example `wal_proposer_slot` and `wal_retention_slot`). Only ever drop this demo's slot, by name.
+- **The replication role needs a native password,** for the same reason as [Step 2](#step-2--create-a-password-role-for-the-connector).
+- **The gateway must be able to reach the Lakebase endpoint** from the compute it runs on ([compute](compute-and-feature-gates.md#compute-serverless-or-classic)).
+- **A stopped gateway lets WAL pile up on the slot.** Drop the slot and the publication at teardown.
+- **Reuse the Step 3 tables** ([Step 3](#step-3--seed-demo-tables-with-a-cursor-and-a-soft-delete-flag)). Their `text` columns are TOAST-able, so they need `REPLICA IDENTITY FULL`: under `DEFAULT` the gateway fails with "needs FULL REPLICA IDENTITY" ([PostgreSQL behaviors](postgresql-cdc.md#source-behaviors-and-errors)). The `updated_at` / `is_deleted` columns are harmless under CDC. The demo moves from query-based to CDC by changing only the connection and pipelines.

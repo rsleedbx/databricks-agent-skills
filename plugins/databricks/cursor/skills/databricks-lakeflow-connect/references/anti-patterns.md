@@ -39,7 +39,7 @@ An ingestion pipeline carries `ingestion_definition`, never a `libraries` block.
 
 ## 4. A cursor that isn't bumped on update
 
-A query-based cursor that isn't bumped on update silently misses changes.
+A query-based cursor that isn't bumped on update silently misses changes. The rules: [cursor column rules](query-based-connectors.md#cursor-column-rules).
 
 ```yaml
 # WRONG: an integer PK, or updated_at with only DEFAULT now(), never changes on UPDATE
