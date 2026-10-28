@@ -298,7 +298,8 @@
         "references/source-sql-through-connection.md",
         "references/sql-server-cdc.md",
         "references/standard-cdc-gateway.md",
-        "references/troubleshooting-and-monitoring.md"
+        "references/troubleshooting-and-monitoring.md",
+        "scripts/rows_per_run.sql"
       ],
       "repo_dir": "skills",
       "version": "0.3.0"

@@ -130,7 +130,7 @@ Minimal JSON for `databricks pipelines create`, a DAB-authored version, and how 
 | [query-based-pipeline.md](references/query-based-pipeline.md) | Query-based connection, pipeline, schedule, networking, gotchas |
 | [ingestion-decision-tree.md](references/ingestion-decision-tree.md) | Connect vs Auto Loader vs Federation vs Delta Sharing |
 | [troubleshooting-and-monitoring.md](references/troubleshooting-and-monitoring.md) | Event-log queries, runtime per update, common errors, escalation |
-| [rows-per-run.md](references/rows-per-run.md) | Rows per table per run: the query and column meanings |
+| [rows-per-run.md](references/rows-per-run.md) | Rows per table per run: [`scripts/rows_per_run.sql`](scripts/rows_per_run.sql), column meanings, SCD2 counts |
 | [lakebase-as-postgres-source.md](references/lakebase-as-postgres-source.md) | Lakebase as a demo Postgres source, end to end |
 | [lakebase-cdc.md](references/lakebase-cdc.md) | Trying Postgres CDC on Lakebase; cleanup if it fails |
 | [source-sql-through-connection.md](references/source-sql-through-connection.md) | Introspecting a source through a UC connection; test DML; replication slots |
