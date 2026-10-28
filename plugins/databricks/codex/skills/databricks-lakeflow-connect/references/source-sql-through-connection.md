@@ -44,10 +44,10 @@ Use this when the user doesn't know their tables, or before generating DML. **Ne
 A foreign catalog (Lakehouse Federation) makes the source browsable in Catalog Explorer and queryable as `<catalog>.<schema>.<table>`. Offer it, don't just create it. Check permission first:
 
 ```bash
-MS=$(databricks metastores current --profile <PROFILE> -o json | yq -r .metastore_id)
+MS=$(databricks metastores current --profile <PROFILE> -o json | jq -r .metastore_id)
 databricks grants get-effective metastore $MS --principal <user> --profile <PROFILE> -o json \
-  | yq -r '[.privilege_assignments[].privileges[].privilege] | unique | join(",")'   # needs CREATE_CATALOG
-databricks connections get <connection> --profile <PROFILE> -o json | yq -r .owner     # owner, or CREATE_FOREIGN_CATALOG on it
+  | jq -r '[.privilege_assignments[].privileges[].privilege] | unique | join(",")'   # needs CREATE_CATALOG
+databricks connections get <connection> --profile <PROFILE> -o json | jq -r .owner     # owner, or CREATE_FOREIGN_CATALOG on it
 ```
 
 Without `CREATE_CATALOG` on the metastore, creation fails with "User does not have CREATE CATALOG on Metastore". Say so and use the `remote_query` introspection below instead; it needs nothing extra.

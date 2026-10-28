@@ -156,7 +156,7 @@ Databricks sets and adjusts the minimum runtime, maximum runtime, and lag thresh
 - **The pipeline also starts updates itself.** After a source schema change, it starts one with cause `SCHEMA_CHANGE`; after a failure, often one with cause `RETRY_ON_FAILURE`. While that update runs, `start-update` is refused ("An active update ... already exists"). Before you start another update or a full refresh, check what's running and wait for it:
 
   ```bash
-  databricks pipelines list-updates <pipeline-id> --max-results 3 -o json | yq '.updates[] | [.update_id, .cause, .state]'
+  databricks pipelines list-updates <pipeline-id> --max-results 3 -o json | jq -r '.updates[] | [.update_id, .cause, .state] | @tsv'
   ```
 
   A failed update is usually followed by the pipeline's own retry. When it also reports `PIPELINE_NON_RETRYABLE_ANALYSIS_CLIENT_ERROR`, no retry follows: start the next update yourself.

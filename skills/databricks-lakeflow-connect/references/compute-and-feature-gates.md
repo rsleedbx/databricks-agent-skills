@@ -18,7 +18,7 @@ Gateway compute errors (`spark_conf` keys, `num_workers: 0`, the classic egress 
 
 ```bash
 databricks pipelines get-update <pipeline-id> <update-id> --profile <PROFILE> -o json \
-  | yq -p json '.update.config.serverless'
+  | jq '.update.config.serverless'
 # true: serverless   false: classic   null: not decided yet, read it again
 ```
 

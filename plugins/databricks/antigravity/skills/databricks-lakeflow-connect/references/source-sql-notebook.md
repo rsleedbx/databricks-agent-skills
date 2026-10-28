@@ -7,7 +7,7 @@ A one-time notebook that lists tables, publications, and slots on a source, and 
 Save as `source_sql.py` (the first line marks it as a Databricks notebook). It takes the connection type as a parameter, so look it up first:
 
 ```bash
-databricks connections get <connection> --profile <PROFILE> -o json | yq -r .connection_type   # POSTGRESQL | MYSQL | SQLSERVER
+databricks connections get <connection> --profile <PROFILE> -o json | jq -r .connection_type   # POSTGRESQL | MYSQL | SQLSERVER
 ```
 
 ```python
@@ -124,9 +124,9 @@ databricks jobs submit --json @submit.json --profile <PROFILE> -o json > run.jso
 No cluster spec means it runs on serverless. `jobs submit` waits for the run (about a minute including startup). Read each task's result from its **task** run ID, not the parent run ID:
 
 ```bash
-RID=$(yq -r .run_id run.json)
-databricks jobs get-run $RID --profile <PROFILE> -o json | yq -r '.tasks[] | "\(.task_key)\t\(.run_id)\t\(.state.result_state)"'
-databricks jobs get-run-output <task-run-id> --profile <PROFILE> -o json | yq -r '.notebook_output.result // .error'
+RID=$(jq -r .run_id run.json)
+databricks jobs get-run $RID --profile <PROFILE> -o json | jq -r '.tasks[] | "\(.task_key)\t\(.run_id)\t\(.state.result_state)"'
+databricks jobs get-run-output <task-run-id> --profile <PROFILE> -o json | jq -r '.notebook_output.result // .error'
 ```
 
 If a task fails, `jobs submit` exits non-zero and `run.json` can be empty: find the run with `databricks jobs list-runs --limit 5 -o json --profile <PROFILE>` by `run_name`.
