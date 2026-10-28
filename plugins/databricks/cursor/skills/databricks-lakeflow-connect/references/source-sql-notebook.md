@@ -129,4 +129,4 @@ databricks jobs get-run $RID --profile <PROFILE> -o json | yq -r '.tasks[] | "\(
 databricks jobs get-run-output <task-run-id> --profile <PROFILE> -o json | yq -r '.notebook_output.result // .error'
 ```
 
-If a task fails, `jobs submit` exits non-zero and `run.json` can be empty: find the run with `databricks jobs list-runs --limit 5 -o json` by `run_name`.
+If a task fails, `jobs submit` exits non-zero and `run.json` can be empty: find the run with `databricks jobs list-runs --limit 5 -o json --profile <PROFILE>` by `run_name`.

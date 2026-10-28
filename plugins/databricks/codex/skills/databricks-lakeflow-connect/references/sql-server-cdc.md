@@ -21,7 +21,7 @@ Errors on SQL Server (grants, capture instances, governor limits), and the docs 
 
 Most pipelines start with CT and switch to CDC only when audit or SCD2 demands it.
 
-**`SCD_TYPE_2` needs CDC on the table, and pipeline create doesn't check it.** An `SCD_TYPE_2` table on change tracking is accepted, then its changes don't arrive, and no error is reported. Before creating the pipeline, check each table you'll set to `SCD_TYPE_2` (on the source, or through the connection with `remote_query`, see [source-sql-through-connection.md](source-sql-through-connection.md)):
+**`SCD_TYPE_2` needs CDC on the table, or change tracking plus `VIEW SERVER STATE` for the connection's login, and pipeline create checks neither.** Without them an `SCD_TYPE_2` table is accepted, then its changes don't arrive, and no error is reported. Before creating the pipeline, check each table you'll set to `SCD_TYPE_2` (on the source, or through the connection with `remote_query`, see [source-sql-through-connection.md](source-sql-through-connection.md)):
 
 ```sql
 SELECT SCHEMA_NAME(t.schema_id) + '.' + t.name AS source_table, t.is_tracked_by_cdc,

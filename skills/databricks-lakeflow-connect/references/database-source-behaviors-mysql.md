@@ -4,7 +4,7 @@ Read the current [MySQL troubleshooting](https://docs.databricks.com/ingestion/l
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `SHOW REPLICAS` is empty while the pipeline reads the binlog | The pipeline reads the binlog as a client, not a replica | Count its sessions in `SHOW PROCESSLIST`: one `Binlog Dump` row per reader, with its address as host. The row can stay for minutes after the update ends; wait for it, or `KILL <connection_id>`, before a run you measure. |
+| `SHOW REPLICAS` is empty while the pipeline reads the binlog | The pipeline reads the binlog as a client, not a replica | Count its sessions in `SHOW PROCESSLIST`: one `Binlog Dump` row per reader, with its address as host. The row can stay for minutes after the update ends; wait for it to close before a run you measure. Don't `KILL` it on a shared source: other pipelines and replicas show the same `Binlog Dump` command. |
 | A table's flow fails with `MYSQL_BINLOG_FILE_DELETED` | The binlog files expired (`binlog_expire_logs_seconds`) before the pipeline read them | Full refresh the table, and keep the binlog well past the schedule interval. |
 | Every ingestion update fails at analysis ("Failed to resolve flow" for the table's flows) | A source table was dropped | Remove the dropped table from the ingestion pipeline. |
 | The flow reports `MISSING_TABLE_IN_SOURCE` and the update fails at analysis, with no privilege message; schema exploration lists one table fewer | `SELECT` revoked from the ingestion login on that table | Grant `SELECT` on the table again, then check that schema exploration lists it. |

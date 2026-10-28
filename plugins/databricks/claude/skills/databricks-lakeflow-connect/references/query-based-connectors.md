@@ -76,7 +76,7 @@ With inserts, updates, and deletes between two runs:
 | Primary key + numeric cursor (bumped on update) | ✅ | ✅ | ✅ |
 | Unique key, no primary key (declare the unique column as `primary_keys`) | ✅ | ✅ | ✅ |
 | No key + cursor, `primary_keys` omitted | ❌ runtime error `CANNOT_INGEST_TABLE_WITHOUT_PRIMARY_KEY` | ❌ same | ✅ (duplicates kept) |
-| No key, **no cursor**, `primary_keys` omitted | ✅ full replace each run | — | ❌ rejected at create: "APPEND_ONLY can only be used for incremental ingestion ... cursor_columns must be set" |
+| No key, **no cursor**, `primary_keys` omitted | ✅ full replace each run; identical rows can collapse to one, so compare row counts after the first run | — | ❌ rejected at create: "APPEND_ONLY can only be used for incremental ingestion ... cursor_columns must be set" |
 | Primary key, no cursor | ✅ full load each run, including hard deletes | — | ❌ needs a cursor |
 | Declared key that isn't unique / has NULLs | ⚠️ **accepted, silent data loss**: source rows are lost, and new rows overwrite existing ones | ⚠️ same risk | n/a |
 | Cursor set on insert only (no update trigger) | ⚠️ **updates never arrive**, no warning | ⚠️ same | ⚠️ same |
@@ -100,11 +100,11 @@ The product accepts whatever you declare. A `primary_keys` value that isn't uniq
 | Cursor has no NULLs | `SUM(CASE WHEN <cursor> IS NULL THEN 1 ELSE 0 END)` | "N rows have a NULL cursor: the first snapshot loads them, but later changes to them are missed." |
 | No duplicate keys | For multi-column key `<k1>, <k2>`: `SELECT COUNT(*) FROM (SELECT <k1>, <k2> FROM <table> GROUP BY <k1>, <k2> HAVING COUNT(*) > 1) d` returns 0 | "N rows have duplicate key values: the pipeline will overwrite them with silent data loss." |
 | Cursor moves on update | Postgres: an update trigger that sets it; MySQL: `on update` in `extra`; SQL Server: a trigger or the app sets it | "Updates won't be picked up unless `<cursor>` changes on every update." |
-| No key | No `primary key` / `unique` row | Offer `APPEND_ONLY` (needs a cursor), or SCD1 with no cursor (full load each run). SCD1/SCD2 with a cursor need a declared key. |
+| No key | No `primary key` / `unique` row | Offer `APPEND_ONLY` (needs a cursor), or SCD1 with no cursor (full load each run; identical rows can collapse to one). SCD1/SCD2 with a cursor need a declared key. |
 
 Run the data checks for all tables in one query (`UNION ALL`), not one table at a time.
 
-**The user can skip these.** Query-based ingestion is often used just to snapshot a table, or for a quick test, where a fake key or a missing index doesn't matter. Report the findings once, say what goes wrong in production, and go ahead if the user says so. Don't ask them to add indexes or constraints to the source; that's their call, and it changes their database.
+**The user can skip these.** Query-based ingestion is often used just to snapshot a table, or for a quick test, where a missing index doesn't matter. A key that isn't unique is different: it loses rows even in the first snapshot, so for a table with no real key offer SCD1 with no cursor, not a made-up key. Report the findings once, say what goes wrong in production, and go ahead if the user says so. Don't ask them to add indexes or constraints to the source; that's their call, and it changes their database.
 
 ---
 

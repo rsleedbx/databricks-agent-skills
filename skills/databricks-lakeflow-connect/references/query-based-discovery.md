@@ -12,21 +12,21 @@ databricks experimental aitools tools query --file <file>.sql --profile <PROFILE
 
 Each query lists every table with its primary key and the date/time columns that could be the cursor. Pick tables that have a primary key and a NOT NULL cursor that changes on every update. Tables without a key need `APPEND_ONLY` (which needs a cursor) or SCD1 with no cursor (a full load each run). See [the shape table](query-based-connectors.md#what-each-source-shape-does-with-each-target) and run the [pre-flight checks](query-based-connectors.md#pre-flight-checks-before-creating-the-pipeline-advise-the-product-doesnt-check) before creating the pipeline.
 
-**PostgreSQL:** list databases first, then the tables in one database.
+**PostgreSQL:** list databases first, through a database the connection can open (the one the user named, or `postgres` if it exists), then the tables in one database. Keys come from `pg_index`: `information_schema.table_constraints` lists only tables the role has more than `SELECT` on, so a read-only login would see no keys.
 
 ```sql
-SELECT * FROM remote_query('<connection>', database => 'postgres', query => "SELECT datname FROM pg_database WHERE NOT datistemplate") ORDER BY 1
+SELECT * FROM remote_query('<connection>', database => '<any-accessible-database>', query => "SELECT datname FROM pg_database WHERE NOT datistemplate") ORDER BY 1
 ```
 
 ```sql
 SELECT * FROM remote_query('<connection>', database => '<database>', query => "
   SELECT c.table_schema, c.table_name,
-         (SELECT string_agg(k.column_name, ',' ORDER BY k.ordinal_position)
-            FROM information_schema.table_constraints tc
-            JOIN information_schema.key_column_usage k
-              ON k.constraint_schema = tc.constraint_schema AND k.constraint_name = tc.constraint_name
-           WHERE tc.table_schema = c.table_schema AND tc.table_name = c.table_name
-             AND tc.constraint_type = 'PRIMARY KEY') AS primary_key,
+         (SELECT string_agg(a.attname, ',' ORDER BY k.ord)
+            FROM pg_index ix
+            CROSS JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord)
+            JOIN pg_attribute a ON a.attrelid = ix.indrelid AND a.attnum = k.attnum
+           WHERE ix.indrelid = format('%I.%I', c.table_schema, c.table_name)::regclass
+             AND ix.indisprimary) AS primary_key,
          string_agg(c.column_name || ' ' || c.data_type || CASE WHEN c.is_nullable = 'NO' THEN ' not null' ELSE '' END,
                     ', ' ORDER BY c.ordinal_position)
            FILTER (WHERE c.data_type LIKE 'timestamp%' OR c.data_type = 'date') AS cursor_candidates

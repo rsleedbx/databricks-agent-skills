@@ -80,7 +80,7 @@ resources:
               destination_catalog: ${var.catalog}
               destination_schema: <name>
               table_configuration:
-                scd_type: SCD_TYPE_1     # SCD_TYPE_2 needs SQL Server CDC, not change tracking
+                scd_type: SCD_TYPE_1     # SCD_TYPE_2: SQL Server CDC, or change tracking + VIEW SERVER STATE
         data_staging_options:
           catalog_name: ${var.catalog}
           schema_name: <name>_staging   # create it with the destination schema
@@ -109,7 +109,7 @@ For MySQL, address tables by `source_schema: <mysql-database>` with no `source_c
           schema_name: <name>_staging
 ```
 
-**Clean up** an integrated CDC pipeline in this order: delete the pipeline (`databricks bundle destroy`, or `databricks pipelines delete <pipeline-id>`), then both schemas, which also removes the staging volume: `databricks schemas delete <catalog>.<name> --force` and `databricks schemas delete <catalog>.<name>_staging --force`. The bundle doesn't own schemas you created by hand, so `bundle destroy` leaves them.
+**Clean up** an integrated CDC pipeline in this order: delete the pipeline (`databricks bundle destroy`, or `databricks pipelines delete <pipeline-id>`), then the schemas, only if this setup created them (the default `<name>` and `<name>_staging`): `databricks schemas delete <catalog>.<name> --force` and `databricks schemas delete <catalog>.<name>_staging --force` remove everything in them, the staging volume included. If the user gave an existing schema, drop only this pipeline's tables and staging volume, and ask before deleting anything. The bundle doesn't own schemas you created by hand, so `bundle destroy` leaves them.
 
 Deleting a pipeline drops its destination tables: copy them out first if they're needed.
 

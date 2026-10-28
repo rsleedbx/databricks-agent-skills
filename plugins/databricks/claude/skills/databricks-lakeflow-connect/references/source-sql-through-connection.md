@@ -1,11 +1,11 @@
 # Source-side SQL through a UC connection
 
-Lakeflow Connect setup and cleanup often needs SQL on the source: list tables, check CDC settings, create or drop a Postgres replication slot. Do it through the existing **Unity Catalog connection** with `remote_query`. You don't need the database password, a secret, or network access from your machine: the SQL runs on Databricks serverless compute, which already reaches the source.
+Lakeflow Connect setup and cleanup often needs SQL on the source: list tables, check CDC settings, create or drop a Postgres replication slot. Do it through the existing **Unity Catalog connection** with `remote_query`. You don't need the database password, a secret, or network access from your machine: the SQL runs on Databricks compute (a SQL warehouse for the CLI, serverless for the notebook), which must reach the source.
 
 Two ways to run it:
 
-- **One query, from the CLI:** `databricks experimental aitools tools query --file <file>.sql`. This is what Step 0 of [query-based-discovery.md](query-based-discovery.md) uses. Good for a single check.
-- **Several queries and actions, as a notebook:** upload the notebook in [source-sql-notebook.md](source-sql-notebook.md) and run it once with `databricks jobs submit`. That's a one-time run: it doesn't create a job in the Jobs UI. Use it for listing everything at once, and for slot create / drop.
+- **One query, from the CLI:** `databricks experimental aitools tools query --file <file>.sql` (it picks a SQL warehouse unless `--warehouse <id>` is set). This is what Step 0 of [query-based-discovery.md](query-based-discovery.md) uses. Good for a single check.
+- **Several queries and actions, as a notebook:** upload the notebook in [source-sql-notebook.md](source-sql-notebook.md) and run it once with `databricks jobs submit`. That's a one-time run: it doesn't create a job in the Jobs UI. Use it for listing everything at once on MySQL, SQL Server and PostgreSQL connections, and for slot create / drop. For Oracle, use the queries in [query-based-discovery.md](query-based-discovery.md).
 
 Don't read UC secrets or ask for the password to do this. The connection is the credential.
 
@@ -100,7 +100,8 @@ ORDER BY table_schema, table_name, ordinal_position
 ```sql
 SELECT * FROM remote_query('<connection>', database => '<database>', query => "
   SELECT n.nspname AS table_schema, c.relname AS table_name, i.relname AS index_name,
-         CASE WHEN ix.indisprimary THEN 'primary key' WHEN ix.indisunique THEN 'unique' ELSE 'index' END AS kind,
+         CASE WHEN ix.indisprimary THEN 'primary key' WHEN ix.indisunique AND ix.indpred IS NOT NULL THEN 'unique (partial)'
+              WHEN ix.indisunique THEN 'unique' ELSE 'index' END AS kind,
          string_agg(a.attname, ',' ORDER BY k.ord) AS columns
     FROM pg_index ix
     JOIN pg_class c ON c.oid = ix.indrelid
@@ -109,7 +110,7 @@ SELECT * FROM remote_query('<connection>', database => '<database>', query => "
     CROSS JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord)
     JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = k.attnum
    WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
-   GROUP BY n.nspname, c.relname, i.relname, ix.indisprimary, ix.indisunique")
+   GROUP BY n.nspname, c.relname, i.relname, ix.indisprimary, ix.indisunique, ix.indpred IS NOT NULL")
 ORDER BY table_schema, table_name, kind, index_name
 ```
 
@@ -156,7 +157,8 @@ ORDER BY table_schema, table_name, ordinal_position
 ```sql
 SELECT * FROM remote_query('<connection>', database => '<database>', query => "
   SELECT s.name AS table_schema, t.name AS table_name, i.name AS index_name,
-         CASE WHEN i.is_primary_key = 1 THEN 'primary key' WHEN i.is_unique = 1 THEN 'unique' ELSE 'index' END AS kind,
+         CASE WHEN i.is_primary_key = 1 THEN 'primary key' WHEN i.is_unique = 1 AND i.has_filter = 1 THEN 'unique (filtered)'
+              WHEN i.is_unique = 1 THEN 'unique' ELSE 'index' END AS kind,
          STRING_AGG(c.name, ',') WITHIN GROUP (ORDER BY ic.key_ordinal) AS columns
     FROM sys.indexes i
     JOIN sys.tables t ON t.object_id = i.object_id
@@ -164,11 +166,11 @@ SELECT * FROM remote_query('<connection>', database => '<database>', query => "
     JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id AND ic.is_included_column = 0
     JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
    WHERE t.is_ms_shipped = 0 AND i.type > 0
-   GROUP BY s.name, t.name, i.name, i.is_primary_key, i.is_unique")
+   GROUP BY s.name, t.name, i.name, i.is_primary_key, i.is_unique, i.has_filter")
 ORDER BY table_schema, table_name, kind, index_name
 ```
 
-How to read `kind`: `primary key`, `unique` (a unique constraint or unique index, which can serve as the key when a table has no primary key), or `index`. A table with no `primary key` or `unique` row has no key: query-based needs `APPEND_ONLY` with a cursor, or SCD1 with no cursor, and integrated CDC keys it on all columns.
+How to read `kind`: `primary key`, `unique` (a unique constraint or unique index, which can serve as the key when a table has no primary key), `unique (filtered)` / `unique (partial)` (unique only for rows matching the index's `WHERE`: not a key for the whole table, and duplicates outside it are lost under SCD1/SCD2), or `index`. A table with no `primary key` or `unique` row has no key: query-based needs `APPEND_ONLY` with a cursor, or SCD1 with no cursor, and integrated CDC keys it on all columns.
 
 ---
 
@@ -197,7 +199,7 @@ An unused slot holds WAL on the source until someone drops it, so create it as l
    CREATE PUBLICATION <slot_name>_pub FOR TABLE <source_schema>.<table1>, <source_schema>.<table2>;
    ```
 
-3. **Create the pipelines:** `bundle deploy`. This is where a workspace without Postgres CDC fails ("Ingestion source 'POSTGRESQL' is not supported in your workspace", 403). If it fails, give the user `DROP PUBLICATION <slot_name>_pub;` and stop. If it succeeds, the gateway is a continuous pipeline and **starts on its own**, and errors until the slot exists: stop it with `databricks pipelines stop <gateway-id>`.
+3. **Create the pipelines:** `bundle deploy`. This is where a workspace without Postgres CDC fails ("Ingestion source 'POSTGRESQL' is not supported in your workspace", 403). If it fails, check what was created (`databricks bundle summary`): stop a created gateway at once (`databricks pipelines stop <gateway-id>`), offer `bundle destroy` for the rest, then give the user `DROP PUBLICATION <slot_name>_pub;` and report anything left. If it succeeds, the gateway is a continuous pipeline and **starts on its own**, and errors until the slot exists: stop it with `databricks pipelines stop <gateway-id>`.
 4. **Slot (through the connection):** `action: create_slot` with `slot_name: <slot_name>` and `database: <database>` (the database the publication is in; a slot belongs to one database). Then start the gateway (`databricks pipelines start-update <gateway-id>`) and run the ingestion pipeline.
 5. **Cleanup** (ask first): `bundle destroy` (or delete the pipelines) so the gateway stops reading. Then run `action: drop_slot` with this pipeline's slot name and database, and give the user `DROP PUBLICATION <slot_name>_pub;` to run. Finish with `action: list` to confirm both are gone.
 
