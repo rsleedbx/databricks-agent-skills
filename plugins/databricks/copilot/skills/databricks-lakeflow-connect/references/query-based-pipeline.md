@@ -40,7 +40,7 @@ GRANT SELECT ON public.orders, public.customers TO <pg-user>;
 resources:
   pipelines:
     pg_query_based:
-      name: <name>                     # <firstname><lastname>_<connection>_<epoch>, see default-names.md
+      name: <name>                     # <firstname><lastname>_<connection>_<epoch>, see prerequisite-checks.md#default-names
       catalog: ${var.catalog}
       schema: <name>                   # the same name as the pipeline
       ingestion_definition:
@@ -88,7 +88,7 @@ The pipeline is serverless by default: leave `serverless` out of the bundle, and
 
 ## Step 3 — schedule
 
-QBC pipelines are triggered: each run is one incremental pull, so the schedule *is* the freshness SLA. (A standard CDC gateway, by contrast, runs continuously until you stop it.)
+Each run is one incremental pull, so the schedule *is* the freshness SLA.
 
 ```yaml
 resources:
@@ -113,9 +113,9 @@ Serverless compute must reach the source database. Cloud databases usually need 
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Updates at the source never show up | Cursor isn't bumped on UPDATE (e.g. `DEFAULT now()` with no trigger) | Add an update trigger, or have the application set the cursor. |
-| Some rows never land | NULL cursor values | Make the cursor `NOT NULL` and backfill. |
-| Every run is a full reload | No cursor configured, the field was spelled `cursor_column` (dropped with an "unknown field" warning), or the cursor isn't monotonic | Set `cursor_columns` (a list) to a monotonic column, then check `pipelines get` shows it. |
+| Updates at the source never show up | Cursor isn't bumped on UPDATE (e.g. `DEFAULT now()` with no trigger) | [cursor rules](query-based-connectors.md#cursor-column-rules) |
+| Some rows never land | NULL cursor values | [cursor rules](query-based-connectors.md#cursor-column-rules) |
+| Every run is a full reload | No cursor configured, the field was spelled `cursor_column` (dropped with an "unknown field" warning), or the cursor isn't monotonic | [cursor rules](query-based-connectors.md#cursor-column-rules) |
 | Deleted rows still in destination | Hard `DELETE` at the source | Switch to soft deletes + `deletion_condition`, or use the Beta hard-delete option / CDC. |
 | Soft-deleted row still present | Delete flag set without bumping the cursor | Make sure the flag update fires the cursor trigger. |
 | SCD2 shows fewer versions than source changes | Several changes between runs collapse to one | Expected for QBC. Run more often, or use CDC. |

@@ -98,13 +98,13 @@ Not production-supported; check the [connector reference](https://docs.databrick
 
 ## Prerequisites
 
-**Bare demo request.** With no source, connector, or CDC mode given, propose Lakebase as the Postgres source with query-based ingestion, once, and proceed when the user confirms. Follow [lakebase-as-postgres-source.md](references/lakebase-as-postgres-source.md). If the user names a source, ask which database or app to ingest from instead.
+**Bare demo request.** With no source, connector, or CDC mode given, propose Lakebase as the Postgres source with query-based ingestion, once, and proceed when the user confirms. Follow [lakebase-as-postgres-source.md](references/lakebase-as-postgres-source.md). If the user names a source, skip this proposal and use that source.
 
-**Default names.** Unless the user names them, the pipeline, its target schema, its schedule job, and its bundle share one name, `<base>_<epoch>`. Rules, the 59-character limit, and the bundle-name warning: [default-names.md](references/default-names.md).
+**Names.** Ask the user for names; for a demo or test without them, one `<base>_<epoch>` for the pipeline, schema, job and bundle. Rules and the limits that hold for any name: [default names](references/prerequisite-checks.md#default-names).
 
 **Same-name source tables** need a destination schema each, or a `destination_table`; pipeline create doesn't catch the clash ([integrated-cdc](references/integrated-cdc.md#where-each-table-lands-what-lfc-names-what-you-choose)).
 
-**Ask before creating anything.** Ask which source to ingest from; for Postgres, offer an existing database or a Lakebase demo stand-in, and never create a stand-in yourself. Ask for every missing input in one message, list what you'll create, and wait for one "yes"; then run the whole setup without asking again. First confirm the checks in [prerequisite-checks.md](references/prerequisite-checks.md): a UC target catalog (not Default Storage for CDC), a UC `CONNECTION`, network reachability from the compute that reads the source, OAuth scope grants for file connectors, and for query-based the [pre-flight checks](references/query-based-connectors.md#pre-flight-checks-before-creating-the-pipeline-advise-the-product-doesnt-check).
+**Ask before creating anything.** Ask which source to ingest from; for Postgres, offer an existing database or a Lakebase demo stand-in, and never create a stand-in yourself. Ask for every missing input in one message, list what you'll create, and wait for one "yes"; then run the whole setup without asking again. First confirm the checks in [prerequisite-checks.md](references/prerequisite-checks.md): a UC target catalog (not Default Storage for CDC), a UC `CONNECTION`, network reachability from the compute that reads the source, and for query-based the [pre-flight checks](references/query-based-connectors.md#pre-flight-checks-before-creating-the-pipeline-advise-the-product-doesnt-check).
 
 ---
 
@@ -120,12 +120,10 @@ Minimal JSON for `databricks pipelines create`, a DAB-authored version, and how 
 |------|--------------|
 | [saas-connectors.md](references/saas-connectors.md) | SaaS connectors: per-connector deltas, OAuth, DAB stubs |
 | [architecture-patterns.md](references/architecture-patterns.md) | Why use LFC; a diagram per pattern |
-| [database-connectors.md](references/database-connectors.md) | Index of the database connector files |
-| [integrated-cdc.md](references/integrated-cdc.md) | Integrated CDC setup, source prerequisites, pipeline YAML, table mapping |
-| [integrated-cdc-updates.md](references/integrated-cdc-updates.md) | Integrated updates: smart closure, self-started updates, behaviors |
+| [integrated-cdc.md](references/integrated-cdc.md) | Integrated CDC: setup, source prerequisites, pipeline YAML, table mapping, smart closure, self-started updates, behaviors |
 | [standard-cdc-gateway.md](references/standard-cdc-gateway.md) | Standard (gateway) CDC: two pipelines, the gateway's compute, gotchas |
-| [sql-server-cdc.md](references/sql-server-cdc.md) | SQL Server: change tracking vs CDC, `SCD_TYPE_2`, source table changes, setup |
-| [postgresql-cdc.md](references/postgresql-cdc.md) | PostgreSQL CDC: slot, publication, pipelines, gotchas; other preview connectors |
+| [sql-server-cdc.md](references/sql-server-cdc.md) | SQL Server: change tracking vs CDC, `SCD_TYPE_2`, source table changes, setup, grants, capture instances, governor limits |
+| [postgresql-cdc.md](references/postgresql-cdc.md) | PostgreSQL CDC: slot, publication, pipelines, gotchas; slot, `wal_level`, replica identity and TLS errors |
 | [compute-and-feature-gates.md](references/compute-and-feature-gates.md) | Serverless vs classic compute, what ran, workspace feature gates |
 | [query-based-connectors.md](references/query-based-connectors.md) | Query-based concepts: cursors, run behavior, shape table, pre-flight |
 | [query-based-discovery.md](references/query-based-discovery.md) | Finding tables, keys, and cursor candidates through a connection |
@@ -137,13 +135,8 @@ Minimal JSON for `databricks pipelines create`, a DAB-authored version, and how 
 | [lakebase-cdc.md](references/lakebase-cdc.md) | Trying Postgres CDC on Lakebase; cleanup if it fails |
 | [source-sql-through-connection.md](references/source-sql-through-connection.md) | Introspecting a source through a UC connection; test DML; replication slots |
 | [source-sql-notebook.md](references/source-sql-notebook.md) | The source SQL notebook and how to run it with `jobs submit` |
-| [database-source-behaviors.md](references/database-source-behaviors.md) | Docs troubleshooting pages per source; destination checks, gateway compute, table limits |
-| [database-source-behaviors-postgresql.md](references/database-source-behaviors-postgresql.md) | PostgreSQL slot, `wal_level`, replica identity, TLS |
-| [database-source-behaviors-mysql.md](references/database-source-behaviors-mysql.md) | MySQL binlog sessions and retention, dropped tables |
-| [database-source-behaviors-sql-server.md](references/database-source-behaviors-sql-server.md) | SQL Server grants, capture instances, governor limits |
-| [database-source-behaviors-oracle.md](references/database-source-behaviors-oracle.md) | Oracle grants, service names, archive logs, skipped tables |
-| [default-names.md](references/default-names.md) | Naming rules for pipelines, schemas, jobs, bundles, connections, slots |
-| [prerequisite-checks.md](references/prerequisite-checks.md) | Catalog, grants, connection and network checks; the confirmation list |
+| [database-source-behaviors.md](references/database-source-behaviors.md) | Docs troubleshooting pages per source; destination checks, gateway compute, table limits; MySQL and Oracle errors |
+| [prerequisite-checks.md](references/prerequisite-checks.md) | Catalog, grants, connection and network checks; default names for demos and tests |
 | [anti-patterns.md](references/anti-patterns.md) | Wrong and right forms of the four most common mistakes |
 | [authoring-and-running.md](references/authoring-and-running.md) | Minimal `pipelines create` JSON, the DAB form, running and polling an update |
 
@@ -156,7 +149,7 @@ For each new ingestion pipeline:
 3. **Create the UC `CONNECTION`** — UI for OAuth U2M, CLI / DAB for everything else.
 4. **Author the pipeline** — `databricks pipelines create --json` for one-offs, DAB YAML for anything shipping to a customer.
 5. **Trigger the first run** and watch the event log ([troubleshooting-and-monitoring.md](references/troubleshooting-and-monitoring.md)).
-6. **Schedule** the triggered pipeline with a Jobs `pipeline_task` (cron or interval). Query-based and standard-CDC pipelines run triggered only (integrated CDC has a continuous option, [integrated-cdc-updates](references/integrated-cdc-updates.md)). `continuous: false` is not itself a schedule; the Jobs trigger sets the cadence.
+6. **Schedule** it with a Jobs `pipeline_task` (cron or interval): `continuous: false` isn't a schedule. Integrated CDC: the interval in [smart closure](references/integrated-cdc.md#how-an-update-runs-smart-closure).
 
 ---
 
@@ -164,9 +157,9 @@ For each new ingestion pipeline:
 
 Four forms that look plausible but fail. The wrong and right JSON and SQL: [anti-patterns.md](references/anti-patterns.md).
 
-1. **Federation syntax.** `CREATE TABLE ... FROM CONNECTION` is Lakehouse Federation, not Lakeflow Connect. Use an `ingestion_definition` ([anti-patterns](references/anti-patterns.md#1-federation-syntax)).
+1. **Federation syntax** (`CREATE TABLE ... FROM CONNECTION`) ([anti-patterns](references/anti-patterns.md#1-federation-syntax)).
 2. **A `libraries` block.** An ingestion pipeline carries `ingestion_definition`, never `libraries` ([anti-patterns](references/anti-patterns.md#2-a-libraries-block)).
-3. **`continuous: true` on a triggered connector.** Query-based and standard-CDC ingestion pipelines are triggered-only ([anti-patterns](references/anti-patterns.md#3-continuous-true-on-a-triggered-connector)).
+3. **`continuous: true` on a triggered connector** ([anti-patterns](references/anti-patterns.md#3-continuous-true-on-a-triggered-connector)).
 4. **A cursor that isn't bumped on update.** It silently misses changes ([anti-patterns](references/anti-patterns.md#4-a-cursor-that-isnt-bumped-on-update)).
 
 ## Important

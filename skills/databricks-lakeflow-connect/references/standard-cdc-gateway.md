@@ -63,5 +63,5 @@ A classic gateway is rejected with "You must use serverless compute in this work
 | Gateway requires an instance type unavailable in the region | Default gateway cluster shape not stocked in the target region | Apply a cluster policy override on the gateway pipeline to pin a regionally-available instance type. |
 | Snapshot-only mode silently disabled | Snapshot-only is not supported for CDC sources | Use CT instead, or accept incremental mode. |
 | Pipeline state diverges from source after 30+ days | Staging Volume retention expired | Full refresh the affected tables, and run the ingestion pipeline well inside the retention. |
-| "Continuous mode not supported" error at create | Query-based and standard-CDC ingestion pipelines are triggered-only (integrated CDC has a continuous mode) | Use `continuous: false` plus a Jobs schedule. |
+| "Continuous mode not supported" error at create | The ingestion pipeline is triggered-only | [anti-patterns](anti-patterns.md#3-continuous-true-on-a-triggered-connector) |
 | Gateway pipeline succeeds but ingestion pipeline shows no new data | Staging path mismatch between the two pipelines | Confirm `gateway_storage_*` on the gateway matches the staging path the ingestion pipeline reads from. |

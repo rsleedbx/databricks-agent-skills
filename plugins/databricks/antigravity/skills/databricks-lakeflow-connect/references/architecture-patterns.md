@@ -51,7 +51,7 @@ Setup: [saas-connectors.md](saas-connectors.md).
    └──────────────────┘
 ```
 
-No gateway: an update ends when smart closure decides. Setup: [integrated-cdc.md](integrated-cdc.md); updates: [integrated-cdc-updates.md](integrated-cdc-updates.md).
+No gateway: an update ends when smart closure decides. Setup: [integrated-cdc.md](integrated-cdc.md); updates: [integrated CDC updates](integrated-cdc.md#how-an-update-runs-smart-closure).
 
 ## Standard database CDC (gateway)
 

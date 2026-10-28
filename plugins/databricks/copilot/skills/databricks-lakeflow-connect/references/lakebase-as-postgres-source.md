@@ -24,7 +24,7 @@ Collect these before running any create command. Use what the user already gave 
 | Target UC catalog (a regular managed catalog, not the Lakebase database catalog) | none: the user must pick |
 | Target schema | `<name>`, the same as the pipeline (unique, so two people's demos in one catalog don't write the same tables). Examples below write `<target_schema>`. |
 | Postgres schema for this demo (also names the role and connection) | `<base>` (e.g. `mydb`): drives the role `<base>_reader` and connection `<firstname><lastname>-<base>-lakebase` |
-| Pipeline, schema, job, and bundle name | `<name>` = `<firstname><lastname>_<connection>_<epoch>` (e.g. `janedoe_mydb_lakebase_1792351234`); see [Default names](default-names.md) |
+| Pipeline, schema, job, and bundle name | `<name>` = `<firstname><lastname>_<connection>_<epoch>` (e.g. `janedoe_mydb_lakebase_1792351234`); see [Default names](prerequisite-checks.md#default-names) |
 | Connector | query-based (Lakebase CDC: see [lakebase-cdc.md](lakebase-cdc.md)) |
 | Seed the `<base>` tables from Step 3 | yes |
 | Schedule job | no (run on demand) |
@@ -237,7 +237,7 @@ targets:
 resources:
   pipelines:
     lakebase_qbc:
-      name: <name>           # default naming, see default-names.md
+      name: <name>           # default naming, see prerequisite-checks.md#default-names
       catalog: ${var.catalog}
       schema: <target_schema>
       ingestion_definition:

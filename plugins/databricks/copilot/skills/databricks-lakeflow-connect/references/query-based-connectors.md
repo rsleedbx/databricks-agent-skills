@@ -2,7 +2,7 @@
 
 Query-based connectors (QBC) ingest from databases that have no CDC feed configured, or where you don't want to set one up. Instead of reading a change log, the connector runs a query on each scheduled run and pulls the rows whose cursor value moved past the last high-water mark.
 
-Supported sources (foreign connection): **Oracle, Teradata, SQL Server, MySQL, MariaDB, PostgreSQL**. Any Lakehouse Federation source is also supported through a foreign catalog. Status: GA; check the [query-based connector limitations](https://docs.databricks.com/ingestion/lakeflow-connect/query-based-limits) for current limits.
+Supported sources (foreign connection): **Oracle, Teradata, SQL Server, MySQL, MariaDB, PostgreSQL**. Any Lakehouse Federation source is also supported through a foreign catalog: you create the foreign catalog with Lakehouse Federation, and the pipeline copies the queried tables to Delta. Release stage: the [connector catalog](../SKILL.md#connector-catalog); current limits: [query-based connector limitations](https://docs.databricks.com/ingestion/lakeflow-connect/query-based-limits).
 
 ## How it differs from the gateway pattern
 

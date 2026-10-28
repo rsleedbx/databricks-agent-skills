@@ -1,12 +1,12 @@
 # SQL Server connector
 
-SQL Server (cloud and on-prem) is the GA database connector. This file covers the source mechanism (change tracking or CDC), source table changes, and cloud and on-prem setup. Pipeline definitions: [integrated-cdc.md](integrated-cdc.md) and [standard-cdc-gateway.md](standard-cdc-gateway.md).
+SQL Server (cloud and on-prem), by change tracking or CDC. This file covers the source mechanism (change tracking or CDC), source table changes, and cloud and on-prem setup. Pipeline definitions: [integrated-cdc.md](integrated-cdc.md) and [standard-cdc-gateway.md](standard-cdc-gateway.md).
 
 ## SQL Server: change tracking vs CDC
 
 SQL Server offers two source mechanisms; pick one per database.
 
-Errors on SQL Server (grants, capture instances, governor limits), and the docs troubleshooting page: [database-source-behaviors-sql-server.md](database-source-behaviors-sql-server.md).
+Errors on SQL Server (grants, capture instances, governor limits), and the docs troubleshooting page: [source behaviors and errors](#source-behaviors-and-errors).
 
 **Change Tracking (CT)** — lightweight. The source tracks "which rows changed since version X" but not the actual change history. The gateway re-reads changed rows from the base table.
 
@@ -63,7 +63,7 @@ A DAB stub with both pipelines:
 resources:
   pipelines:
     sqlserver_gateway:
-      name: <base>_gw_<epoch>          # <firstname><lastname>_<connection>_gw_<epoch>, see default-names.md
+      name: <base>_gw_<epoch>          # <firstname><lastname>_<connection>_gw_<epoch>, see prerequisite-checks.md#default-names
       gateway_definition:
         connection_name: my_sqlserver_connection
         gateway_storage_catalog: ${var.catalog}
@@ -96,3 +96,18 @@ Same setup as cloud, plus private networking from the gateway to the on-prem sou
 - **GCP**: Cloud Interconnect or Cloud VPN.
 
 The private link has to reach the network of the compute that reads the source: the workspace's classic compute network, or serverless through a network connectivity configuration (NCC). See [compute](compute-and-feature-gates.md#compute-serverless-or-classic).
+
+## Source behaviors and errors
+
+Read the current [SQL Server troubleshooting](https://docs.databricks.com/ingestion/lakeflow-connect/sql-server-troubleshoot) and [limitations](https://docs.databricks.com/ingestion/lakeflow-connect/sql-server-limits) pages first: error text, the setup utility's grants and objects, and limits change between releases. Data types: the [SQL Server connector reference](https://docs.databricks.com/ingestion/lakeflow-connect/sql-server-reference). Below is what follows from how SQL Server change tracking and CDC work. Shared behaviors (reading the destination, gateway compute, table limits): [database-source-behaviors.md](database-source-behaviors.md). `TRUNCATE`, drop and recreate, key and column changes: [source table changes](#sql-server-change-tracking-vs-cdc).
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| "VIEW DATABASE PERFORMANCE STATE permission denied in database <database>" (`GENERIC_SNAPSHOT_FAILURE`) | The ingestion login lacks the grant; the setup utility may not give it | `GRANT VIEW DATABASE PERFORMANCE STATE TO [<user>];`, then start a new update: the failed one doesn't retry. |
+| After a schema change, rows written later never arrive, with no error | `VIEW DATABASE STATE` revoked from the ingestion login | Keep `VIEW DATABASE STATE` on the login (it implies `VIEW DATABASE PERFORMANCE STATE`), and check new rows after each schema change. |
+| `INGESTION_GATEWAY_DDL_OBJECTS_MISSING`: "DDL objects missing on table <schema>.<table>. Execute the DDL objects script and full refresh the table" | The setup utility's DDL support objects are missing on the database | Run the DDL objects script the message names, then full refresh the table. |
+| Updates complete with no error event, and a changed row doesn't arrive | A table's capture instance was disabled or changed (`sp_cdc_disable_table`) | After any change to a capture instance, full refresh the table. |
+| `INGESTION_GATEWAY_CDC_LOG_TRUNCATED`: "CDC log truncated, full refresh required" on a table whose capture is on | The capture-instance name differs in case from its table (case-insensitive database) | Take the exact name from `SELECT capture_instance FROM cdc.change_tables;`, then full refresh the table. |
+| Error 8649 at compile, or a snapshot that ends early and completes short with no error event | A query governor cost limit or Resource Governor `REQUEST_MAX_CPU_TIME_SEC` set for the ingestion login | Remove or raise the limit for that login, then count rows after `SNAPSHOT_COMPLETED`. |
+| An update to one copy of an identical row removes the other copy from the destination | A table without a primary key holds identical rows: the table is keyed on all columns | Add a primary key at the source before the first load. |
+| The next update completes with the new column; earlier rows are NULL in it | Column added after the first load | None needed: no full refresh. |

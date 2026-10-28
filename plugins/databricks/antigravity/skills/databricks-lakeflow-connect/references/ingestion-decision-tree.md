@@ -20,7 +20,7 @@ Pick the row that matches your source type and constraint.
 | Where does the data live? | Need a copy? | Approach | Read more |
 |---|---|---|---|
 | SaaS app with a Lakeflow Connect connector (Salesforce, Workday, ServiceNow, GA4, HubSpot, Confluence, etc.) | Yes | Lakeflow Connect | [SKILL.md](../SKILL.md), [saas-connectors.md](saas-connectors.md) |
-| Operational database (SQL Server, PostgreSQL, MySQL) with a Lakeflow Connect connector | Yes, with CDC | Lakeflow Connect | [database-connectors.md](database-connectors.md) |
+| Operational database (SQL Server, PostgreSQL, MySQL) with a Lakeflow Connect connector | Yes, with CDC | Lakeflow Connect | [connector catalog](../SKILL.md#connector-catalog) |
 | Operational database without CDC enabled (Oracle, Teradata, SQL Server, PostgreSQL, MySQL, MariaDB) with a usable `updated_at`-style column | Yes, latest state per run | Lakeflow Connect query-based | [query-based-connectors.md](query-based-connectors.md) |
 | Lakebase Postgres (real data) | Yes | Lakehouse Sync (native, not Lakeflow Connect) | **databricks-lakebase** |
 | Lakebase Postgres standing in for a customer's PostgreSQL in a **demo** | Yes | Lakeflow Connect (Postgres query-based) | [lakebase-as-postgres-source.md](lakebase-as-postgres-source.md) |

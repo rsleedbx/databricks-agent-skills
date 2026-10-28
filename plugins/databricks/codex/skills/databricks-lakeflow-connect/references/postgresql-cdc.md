@@ -2,7 +2,7 @@
 
 Same gateway pattern as SQL Server. Postgres logical replication (`pgoutput`) replaces CT/CDC. Supports PostgreSQL 13+, including RDS / Aurora, Azure Database for PostgreSQL Flexible Server, and Cloud SQL.
 
-Slot creation and loss, `wal_level`, replica identity and TLS errors, and the docs troubleshooting page: [database-source-behaviors-postgresql.md](database-source-behaviors-postgresql.md).
+Slot creation and loss, `wal_level`, replica identity and TLS errors, and the docs troubleshooting page: [source behaviors and errors](#source-behaviors-and-errors).
 
 ### Source setup
 
@@ -92,7 +92,7 @@ SELECT c.relname, c.relreplident FROM pg_class c
 
 ### Postgres-specific gotchas
 
-Errors on the slot, `wal_level`, replica identity and TLS: [database-source-behaviors-postgresql.md](database-source-behaviors-postgresql.md).
+Errors on the slot, `wal_level`, replica identity and TLS: [source behaviors and errors](#source-behaviors-and-errors).
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
@@ -101,17 +101,20 @@ Errors on the slot, `wal_level`, replica identity and TLS: [database-source-beha
 | Updates / deletes missing columns | `REPLICA IDENTITY DEFAULT` on a table without a PK or with TOASTed columns | `ALTER TABLE ... REPLICA IDENTITY FULL`. |
 | Table not replicating | Not in the publication | `ALTER PUBLICATION <slot_name>_pub ADD TABLE <schema>.<table>;` |
 | Gateway create fails: "Ingestion source 'POSTGRESQL' is not supported in your workspace" (403) | Postgres CDC isn't enabled on this workspace (query-based Postgres can still work) | Ask the Databricks account team or support to enable it. Don't work around it. If you already created a slot, drop it. The deploy may have created the destination and staging schemas before failing: offer `bundle destroy` to remove them. |
-| Slot creation fails | Wrong role, or `wal_level` not `logical` | Create the slot as the `REPLICATION` role, after the publication, with `pgoutput`. |
 | A table stops with `INGESTION_GATEWAY_DDL_NOT_SUPPORTED` after a column change (`ADD`, `DROP` or `RENAME COLUMN`) | Which column changes are applied in place changes between releases: see the [limitations page](https://docs.databricks.com/ingestion/lakeflow-connect/postgresql-limits) | Full refresh the table, or set `auto_full_refresh_policy` on it. |
 
 Using Lakebase as the Postgres source for a demo: see [lakebase-as-postgres-source.md](lakebase-as-postgres-source.md). For CDC on Lakebase, try creating the publication first: if Lakebase refuses it ("CREATE PUBLICATION is not enabled on this Lakebase instance"), CDC can't run there yet, so use query-based.
 
----
+## Source behaviors and errors
 
-## Other database connectors (brief)
+Read the current [PostgreSQL troubleshooting](https://docs.databricks.com/ingestion/lakeflow-connect/postgresql-troubleshoot) and [limitations](https://docs.databricks.com/ingestion/lakeflow-connect/postgresql-limits) pages first: error text, schema-change handling and limits change between releases. Below is what follows from how PostgreSQL logical replication works. Shared behaviors (reading the destination, gateway compute, table limits): [database-source-behaviors.md](database-source-behaviors.md).
 
-Use the [connector reference](https://docs.databricks.com/ingestion/lakeflow-connect/) for current setup steps:
-
-- **MySQL CDC**: the integrated CDC pipeline (GA, no separate gateway pipeline) is the default ([integrated-cdc.md](integrated-cdc.md), [docs](https://docs.databricks.com/ingestion/lakeflow-connect/mysql-integrated-pipeline)); the gateway-based pattern is Public Preview. Binlog replaces CT/CDC.
-- **Oracle / Teradata / SQL Server / Postgres / MySQL / MariaDB query-based** (GA): no separate gateway pipeline; see [query-based-connectors.md](query-based-connectors.md).
-- **Snowflake / Redshift / Synapse / BigQuery (Foreign Catalog)** (GA): you create the foreign catalog with Lakehouse Federation; Lakeflow Connect reads through it and materializes the queried subset to Delta. Most useful for warehouse-to-lakehouse migration scenarios.
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `CDC_NOT_ENABLED`: `Logical replication slot <slot_name> doesn't exist with pgoutput plugin` | The slot doesn't exist when the first update runs, or it was dropped | Create the slot as a role with `REPLICATION` (or a superuser) in the database the connection opens: `SELECT pg_create_logical_replication_slot('<slot_name>', 'pgoutput');`. The gateway doesn't create it. If it was dropped, also full refresh the tables: a full refresh doesn't recreate the slot. |
+| `INGESTION_GATEWAY_PG_SLOT_IS_INVALIDATED` | The slot lost its WAL (removed past `max_slot_wal_keep_size`) | Create the slot again, then full refresh. A lost slot shows `wal_status = 'lost'` in `pg_replication_slots`. |
+| `CDC_NOT_ENABLED`: "wal_level is set to 'replica'. It should be set to 'logical' for CDC to work." The update can sit in `INITIALIZING` with no events | `wal_level` isn't `logical` | Set `wal_level = logical` (RDS/Aurora: `rds.logical_replication = 1`), restart the server, then start the update. |
+| At server start: `FATAL: logical replication slot "<slot_name>" exists, but wal_level < logical` | `wal_level` lowered while logical slots exist | Stop the gateway and drop the logical slots before lowering `wal_level`. |
+| `INGESTION_GATEWAY_CDC_NOT_ENABLED`: "has a TOAST-able type column, and needs FULL REPLICA IDENTITY" | A table with an unbounded TOAST-able column (`text` and alike) under `REPLICA IDENTITY DEFAULT`; also after adding such a column, or switching a table to `DEFAULT` or `NOTHING` (it fails at the next change, not at the DDL) | `ALTER TABLE <schema>.<table> REPLICA IDENTITY FULL;`, then full refresh the table. Bounded types (`varchar(n)`) are fine under `DEFAULT`. |
+| `INGESTION_GATEWAY_CONNECTION_ERROR.TLS_CONNECTION_FAILURE` | `verify-ca` SSL mode with a self-signed server certificate | Add `"trustServerCertificate": "true"` to the connection's options, or use a certificate from a CA. |
+| `INGESTION_GATEWAY_CONNECTION_ERROR.SOURCE_AUTHENTICATION_FAILURE`: "The server does not support SSL" | The gateway requires SSL; `remote_query` through the same connection works without it | Turn on `ssl` on the source. With a self-signed certificate, also add `"trustServerCertificate": "true"`. |

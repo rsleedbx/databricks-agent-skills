@@ -156,7 +156,7 @@ Where the numbers come from:
 
 Things to tell the user:
 
-- **Running updates report partial counts.** An integrated CDC update keeps running until smart closure ends it (see [integrated-cdc-updates.md](integrated-cdc-updates.md#how-an-update-runs-smart-closure)), so re-run the query after it completes.
+- **Running updates report partial counts.** An integrated CDC update keeps running until smart closure ends it (see [integrated CDC updates](integrated-cdc.md#how-an-update-runs-smart-closure)), so re-run the query after it completes.
 - **Failed runs still report** what each table loaded before the failure. A run that failed before any table started shows one `(no table ran)` row; pull its error with the `level IN ('ERROR', 'WARN')` query above.
 - **No primary key under CDC (integrated or standard):** the table is keyed on all columns, so identical source rows collapse. The snapshot count can be far below the source row count. Use SCD Type 2, or add a key at the source.
 - **Query-based counts can exceed the real changes.** With a timestamp cursor, SCD1 and SCD2 re-read a short lookback window before the high-water mark and merge by key, so `upserted` can include rows that didn't change (for example, more upserts than inserts on an SCD1 table). On SCD2 tables it's much larger: about the table's row count plus the changes, on every incremental run, and soft deletes close the current version instead of counting as `deleted`. For an exact count, use the per-key query below for SCD2 and spot-check SCD1 against the source.

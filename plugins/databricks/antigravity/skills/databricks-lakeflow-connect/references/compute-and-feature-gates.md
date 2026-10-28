@@ -18,11 +18,11 @@ Gateway compute errors (`spark_conf` keys, `num_workers: 0`, the classic egress 
 
 ```bash
 databricks pipelines get-update <pipeline-id> <update-id> --profile <PROFILE> -o json \
-  | yq -p json -o tsv '[(.update.config.serverless | tostring), (.update.cluster_id // "none")]'
-# true  none        serverless
-# false <cluster>   classic, on its own cluster
-# null  ...         not decided yet: read it again
+  | yq -p json '.update.config.serverless'
+# true: serverless   false: classic   null: not decided yet, read it again
 ```
+
+Read only `update.config.serverless`: a serverless update has a `cluster_id` too, so `cluster_id` doesn't tell the two apart.
 
 `pipelines get` doesn't tell: its `spec.serverless` stays unset, echoing what you sent. **If the create fails on compute, or the update can't reach the source, find out which first (see the two failures below), then set the opposite explicitly and retry.** A wrong host or port, or a source down, gives the same connection error on either compute: flipping won't fix it. For a query-based pipeline the opposite of serverless is classic compute, which is Beta and needs a `clusters` block as well as `serverless: false` ([query-based-pipeline.md](query-based-pipeline.md#step-2--pipeline-foreign-connection)); change both in one step and say so. The default differs by workspace and mode: on a workspace with classic compute, a gateway or an integrated CDC pipeline left unset can run classic while query-based runs serverless; on a serverless-only workspace, a gateway left unset is refused at create.
 

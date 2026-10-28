@@ -4,7 +4,7 @@ The minimal `ingestion_definition` for `databricks pipelines create --json`, the
 
 ## Minimal Example — Salesforce ingestion pipeline
 
-The canonical authoring path is JSON to `databricks pipelines create --json`. (There is no SQL `CREATE TABLE … FROM CONNECTION` syntax for Lakeflow Connect — that syntax exists only for Lakehouse Federation, which is a different product.)
+The canonical authoring path is JSON to `databricks pipelines create --json`.
 
 ```bash
 databricks pipelines create --json '{
