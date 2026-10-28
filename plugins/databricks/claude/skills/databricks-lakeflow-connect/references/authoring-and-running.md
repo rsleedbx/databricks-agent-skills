@@ -35,14 +35,6 @@ databricks bundle run salesforce_ingestion           # KEY = the pipeline resour
 databricks bundle run salesforce_ingestion --no-wait
 ```
 
-A pipeline created with `pipelines create --json` has no run-by-name CLI. Start and poll an update by pipeline ID:
-
-```bash
-databricks pipelines start-update <pipeline-id>             # returns an update_id
-databricks pipelines get-update  <pipeline-id> <update-id>  # poll one update's status
-databricks pipelines list-updates <pipeline-id>             # recent updates and their states
-```
-
-That asymmetry is one more reason to author with a Declarative Automation Bundle.
+A pipeline created with `pipelines create --json` has no run-by-name command: start and poll an update by its ID (`databricks pipelines start-update`, `get-update`, `list-updates`; see **databricks-pipelines**). One more reason to author with a bundle.
 
 ---

@@ -40,27 +40,11 @@ The cursor drives correctness. Get it wrong and changes are silently missed.
 - **Prefer a timestamp** that is bumped on every insert *and* update (e.g. `updated_at`).
 - **A numeric cursor works if it moves on every change**, for example a version column set from a sequence by an insert/update trigger. An auto-increment ID only moves on insert, so it suits append-only tables: an update that leaves the ID unchanged is never picked up.
 - **Values must never decrease.**
-- **NULL cursor rows are skipped after the first run.** The initial snapshot loads them, but a row inserted or left with a NULL cursor later is never picked up. Make the column `NOT NULL` with a default.
+- **NULL cursor rows:** the [query-based limits](https://docs.databricks.com/ingestion/lakeflow-connect/query-based-limits) page says rows with a NULL cursor aren't ingested. A first snapshot can still load them, while later NULL-cursor rows are skipped, so don't promise either: make the column `NOT NULL` with a default.
 - **No usable cursor = full load every run.** That also reflects hard deletes, at the cost of reading the whole table each time.
 - **The field is `cursor_columns` (a list), even with one column.** Some docs spell it `cursor_column`, but the API doesn't know that field: the CLI prints `Warning: unknown field: cursor_column`, drops it, and creates the pipeline **without a cursor**, so every run silently becomes a full load. After creating a pipeline, check `databricks pipelines get <id>` shows `query_based_connector_config.cursor_columns`.
 
-On Postgres, a `DEFAULT now()` column only covers inserts. Updates need a trigger:
-
-```sql
-ALTER TABLE public.orders
-  ADD COLUMN updated_at timestamptz NOT NULL DEFAULT now();
-
-CREATE OR REPLACE FUNCTION public.set_updated_at() RETURNS trigger AS $$
-BEGIN
-  NEW.updated_at := now();
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER orders_set_updated_at
-  BEFORE UPDATE ON public.orders
-  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
-```
+On Postgres, `DEFAULT now()` covers inserts only; updates need a `BEFORE UPDATE` trigger that sets the column (the Lakebase demo's seed has one: [Step 3](lakebase-as-postgres-source.md#step-3--seed-demo-tables-with-a-cursor-and-a-soft-delete-flag)).
 
 Add an index on the cursor column on large tables so the incremental query doesn't scan the whole table.
 
@@ -80,7 +64,7 @@ With inserts, updates, and deletes between two runs:
 | Primary key, no cursor | ✅ full load each run, including hard deletes | — | ❌ needs a cursor |
 | Declared key that isn't unique / has NULLs | ⚠️ **accepted, silent data loss**: source rows are lost, and new rows overwrite existing ones | ⚠️ same risk | n/a |
 | Cursor set on insert only (no update trigger) | ⚠️ **updates never arrive**, no warning | ⚠️ same | ⚠️ same |
-| Cursor with NULLs | ⚠️ snapshot loads them; later NULL-cursor rows are skipped | ⚠️ same | ⚠️ same |
+| Cursor with NULLs | ⚠️ not ingested, per the docs (a first snapshot can still load them) | ⚠️ same | ⚠️ same |
 | Hard deletes, `hard_deletion_sync_min_interval_in_seconds` set | ✅ deleted rows removed | not supported (per docs) | n/a |
 
 On a keyless `APPEND_ONLY` table, an update appends a new row.
@@ -97,7 +81,7 @@ The product accepts whatever you declare. A `primary_keys` value that isn't uniq
 |---|---|---|
 | Declared key is a real primary key or unique constraint | The key columns match a `primary key` or `unique` row in the keys-and-indexes result | "`<cols>` isn't a primary key or unique constraint on `<table>`." Then check the data: `count(*)`, `count(DISTINCT <key>)`, and `SUM(CASE WHEN <key> IS NULL THEN 1 ELSE 0 END)`. Duplicates or NULLs mean **silent data loss** under SCD1/SCD2. |
 | Cursor column has an index | An `index`, `unique`, or `primary key` row whose first column is the cursor | "`<cursor>` has no index on `<table>`: every incremental run scans the whole table." |
-| Cursor has no NULLs | `SUM(CASE WHEN <cursor> IS NULL THEN 1 ELSE 0 END)` | "N rows have a NULL cursor: the first snapshot loads them, but later changes to them are missed." |
+| Cursor has no NULLs | `SUM(CASE WHEN <cursor> IS NULL THEN 1 ELSE 0 END)` | "N rows have a NULL cursor: the docs say they aren't ingested (a first snapshot can still load them), and later changes to them are missed." |
 | No duplicate keys | For multi-column key `<k1>, <k2>`: `SELECT COUNT(*) FROM (SELECT <k1>, <k2> FROM <table> GROUP BY <k1>, <k2> HAVING COUNT(*) > 1) d` returns 0 | "N rows have duplicate key values: the pipeline will overwrite them with silent data loss." |
 | Cursor moves on update | Postgres: an update trigger that sets it; MySQL: `on update` in `extra`; SQL Server: a trigger or the app sets it | "Updates won't be picked up unless `<cursor>` changes on every update." |
 | No key | No `primary key` / `unique` row | Offer `APPEND_ONLY` (needs a cursor), or SCD1 with no cursor (full load each run; identical rows can collapse to one). SCD1/SCD2 with a cursor need a declared key. |

@@ -272,18 +272,16 @@
       "version": "0.1.0"
     },
     "databricks-lakeflow-connect": {
-      "description": "Build managed ingestion pipelines into Databricks using Lakeflow Connect.",
+      "description": "Build managed ingestion pipelines with Lakeflow Connect from SaaS apps (Salesforce, Workday, ServiceNow, ...) and databases (SQL Server, PostgreSQL, MySQL, Oracle; CDC or query-based) into Unity Ca...",
       "files": [
         "SKILL.md",
         "agents/openai.yaml",
         "assets/databricks.png",
         "assets/databricks.svg",
         "references/anti-patterns.md",
-        "references/architecture-patterns.md",
         "references/authoring-and-running.md",
         "references/compute-and-feature-gates.md",
         "references/database-source-behaviors.md",
-        "references/ingestion-decision-tree.md",
         "references/integrated-cdc.md",
         "references/lakebase-as-postgres-source.md",
         "references/lakebase-cdc.md",

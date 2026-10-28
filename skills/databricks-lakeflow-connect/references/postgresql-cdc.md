@@ -6,31 +6,19 @@ Slot creation and loss, `wal_level`, replica identity and TLS errors, and the do
 
 ### Source setup
 
-Run as an admin or the table owner — the replication user can't create its own grants or publications.
+Run as an admin or the table owner: the replication user can't create its own grants or publications. The user and its grants (`REPLICATION`, or `rds_replication` on RDS/Aurora; `SELECT` on the tables): [PostgreSQL privileges](https://docs.databricks.com/ingestion/lakeflow-connect/postgresql-privileges).
 
 ```sql
-SHOW wal_level;                       -- must be 'logical' (RDS/Aurora: rds.logical_replication = 1)
-
-CREATE USER databricks_replication WITH PASSWORD '<strong-generated-password>';
-GRANT CONNECT ON DATABASE <db> TO databricks_replication;
-GRANT USAGE ON SCHEMA <schema> TO databricks_replication;
-GRANT SELECT ON TABLE <schema>.<table> TO databricks_replication;
-ALTER USER databricks_replication WITH REPLICATION;
--- RDS/Aurora only: GRANT rds_replication TO databricks_replication;
-
--- Tables with a PK and no large TOASTable columns: DEFAULT. Otherwise (or no PK): FULL.
-ALTER TABLE <schema>.<table> REPLICA IDENTITY DEFAULT;
-
--- One publication and one slot per pipeline pair, named after it: <slot_name> is the pair's <base>_<epoch>
--- (e.g. janedoe_my_pg_conn_1792351234), not the destination schema's name. Never share either between pipelines.
+SHOW wal_level;   -- must be 'logical' (RDS/Aurora: rds.logical_replication = 1)
+ALTER TABLE <schema>.<table> REPLICA IDENTITY FULL;   -- DEFAULT only for a table with a primary key and no unbounded TOAST-able column
 CREATE PUBLICATION <slot_name>_pub FOR TABLE <schema>.<table1>, <schema>.<table2>;
-
--- Slot: only pgoutput is supported, and a slot has one consumer at a time. Create it after the pipelines
--- deploy, so a rejected pipeline doesn't leave an unused slot holding WAL. Slots have no owner: create it
--- as any role with REPLICATION (or rds_replication). No SET ROLE needed; on PG 16+ a non-superuser admin
--- usually can't SET ROLE to a role it created.
-SELECT pg_create_logical_replication_slot('<slot_name>', 'pgoutput');
+SELECT pg_create_logical_replication_slot('<slot_name>', 'pgoutput');   -- after the pipelines deploy
 ```
+
+- **One publication and one slot per pipeline pair**, named after it: `<slot_name>` is the pair's `<base>_<epoch>` (e.g. `janedoe_my_pg_conn_1792351234`), not the destination schema's name. Never share either between pipelines.
+- **`pgoutput` only,** and a slot has one consumer at a time.
+- **Create the slot after the pipelines deploy,** so a rejected pipeline doesn't leave an unused slot holding WAL.
+- **Slots have no owner:** create it as any role with `REPLICATION` (or `rds_replication`). No `SET ROLE` needed; on PostgreSQL 16+ a non-superuser admin usually can't `SET ROLE` to a role it created.
 
 Server parameters:
 

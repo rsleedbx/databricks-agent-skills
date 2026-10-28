@@ -1,6 +1,6 @@
 ---
 name: databricks-lakeflow-connect
-description: "Build managed ingestion pipelines into Databricks using Lakeflow Connect. Use when ingesting from SaaS apps (Salesforce, Workday Reports, ServiceNow, Google Analytics 4, HubSpot, Confluence) or databases (SQL Server cloud and on-prem, integrated single-pipeline or standard gateway CDC; MySQL and Oracle integrated CDC; PostgreSQL/MySQL standard CDC; query-based ingestion from Oracle, Teradata, SQL Server, PostgreSQL, MySQL, MariaDB using a cursor column) into Unity Catalog with serverless pipelines. Also use when demoing the Postgres connector with Lakebase as a stand-in PostgreSQL source."
+description: "Build managed ingestion pipelines with Lakeflow Connect from SaaS apps (Salesforce, Workday, ServiceNow, ...) and databases (SQL Server, PostgreSQL, MySQL, Oracle; CDC or query-based) into Unity Catalog. Also for demoing the Postgres connector with Lakebase as the source."
 compatibility: Requires databricks CLI (>= v0.294.0)
 metadata:
   version: "0.3.0"
@@ -19,7 +19,7 @@ Build managed ingestion pipelines that pull from SaaS apps and databases into Un
 
 Managed connectors for ingesting data from SaaS applications and databases. The resulting ingestion pipeline is governed by Unity Catalog and powered by serverless compute and Lakeflow Spark Declarative Pipelines.
 
-There are five architecture patterns ([diagrams](references/architecture-patterns.md)):
+There are five architecture patterns:
 
 1. **SaaS pull** — reads an external SaaS via OAuth or API key into a streaming Delta table.
 2. **Integrated database CDC** (the default for CDC) — one pipeline reads the change log (SQL Server change tracking / CDC, MySQL binlog, Oracle redo log) inside each update. No separate gateway pipeline. Check the current docs for source support and compute ([integrated-cdc.md](references/integrated-cdc.md#integrated-cdc-default-vs-standard-cdc)).
@@ -43,7 +43,7 @@ Decide this before you build. Lakeflow Connect is the managed **pull** path for 
 | Lakebase Postgres as a stand-in for customer PostgreSQL in a **demo** | **Lakeflow Connect** (Postgres query-based) | this skill — [lakebase-as-postgres-source.md](references/lakebase-as-postgres-source.md) |
 | A partner offering a Delta share | Delta Sharing | — |
 
-Federation-vs-Connect and Auto-Loader-vs-Connect reasoning: [ingestion-decision-tree.md](references/ingestion-decision-tree.md).
+SFTP and SharePoint look like file sources but go through Lakeflow Connect, not Auto Loader, which is for cloud object storage. Whether you need a copy decides Lakehouse Federation (query in place) or Lakeflow Connect (a governed copy).
 
 ---
 
@@ -119,7 +119,6 @@ Minimal JSON for `databricks pipelines create`, a DAB-authored version, and how 
 | File | When to read |
 |------|--------------|
 | [saas-connectors.md](references/saas-connectors.md) | SaaS connectors: per-connector deltas, OAuth, DAB stubs |
-| [architecture-patterns.md](references/architecture-patterns.md) | Why use LFC; a diagram per pattern |
 | [integrated-cdc.md](references/integrated-cdc.md) | Integrated CDC: setup, source prerequisites, pipeline YAML, table mapping, smart closure, self-started updates, behaviors |
 | [standard-cdc-gateway.md](references/standard-cdc-gateway.md) | Standard (gateway) CDC: two pipelines, the gateway's compute, gotchas |
 | [sql-server-cdc.md](references/sql-server-cdc.md) | SQL Server: change tracking vs CDC, `SCD_TYPE_2`, source table changes, setup, grants, capture instances, governor limits |
@@ -128,8 +127,7 @@ Minimal JSON for `databricks pipelines create`, a DAB-authored version, and how 
 | [query-based-connectors.md](references/query-based-connectors.md) | Query-based concepts: cursors, run behavior, shape table, pre-flight |
 | [query-based-discovery.md](references/query-based-discovery.md) | Finding tables, keys, and cursor candidates through a connection |
 | [query-based-pipeline.md](references/query-based-pipeline.md) | Query-based connection, pipeline, schedule, networking, gotchas |
-| [ingestion-decision-tree.md](references/ingestion-decision-tree.md) | Connect vs Auto Loader vs Federation vs Delta Sharing |
-| [troubleshooting-and-monitoring.md](references/troubleshooting-and-monitoring.md) | Event-log queries, runtime per update, common errors, escalation |
+| [troubleshooting-and-monitoring.md](references/troubleshooting-and-monitoring.md) | Event-log queries, runtime per update, common errors |
 | [rows-per-run.md](references/rows-per-run.md) | Rows per table per run: [`scripts/rows_per_run.sql`](scripts/rows_per_run.sql), column meanings, SCD2 counts |
 | [lakebase-as-postgres-source.md](references/lakebase-as-postgres-source.md) | Lakebase as a demo Postgres source, end to end |
 | [lakebase-cdc.md](references/lakebase-cdc.md) | Trying Postgres CDC on Lakebase; cleanup if it fails |

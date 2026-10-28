@@ -28,7 +28,7 @@ For event-log table conventions (filtering by `event_type`, joining with metrics
 Before comparing two updates that behaved differently, check what each ran on. Nothing in the pipeline has to change for the runtime to change between updates:
 
 - **The version can change.** Pipelines are versionless: Databricks upgrades the runtime on its own, and reverts a pipeline to the previous version if an upgrade stops it from starting ([pipeline release notes](https://docs.databricks.com/release-notes/dlt/)). The `channel` setting (`CURRENT` or `PREVIEW`) picks which version line, not the exact version.
-- **The CPU architecture can change.** Serverless updates run on x86 or ARM depending on capacity, so on the same version one update can run on x86 and the next on ARM (`aarch64` in the image name; no suffix means x86). There is no pipeline setting for it. Cost per update can differ between the two: if DBU usage steps up or down at the same time as the architecture changes, show support the image names of the updates before and after, since they can pin a pipeline or workspace to one architecture.
+- **The CPU architecture can change.** Serverless updates run on x86 or ARM (`aarch64` in the image name), with no setting for it.
 - **The settings can change.** Each update records the settings it ran with. Settings appear, disappear and change between runtime versions, and a setting you see in one update can be gone in a later one.
 
 Each update's `runtime_details` event shows the version, channel and image, and its `runtime_configuration` the settings:
@@ -77,14 +77,4 @@ Error text and codes change between releases. For a database source, read its cu
 | "The number of tables in this pipeline ... exceeds the quota of ... tables per pipeline" | The hidden CDC staging table counts toward the quota | Keep each pipeline one table under the quota, and split the rest over pipelines. See [table limits](database-source-behaviors.md#table-limits). |
 | Any other database source error (`INGESTION_GATEWAY_*`, `ORA-*`, replication slots, grants, logs) | Source settings, grants, or log retention | Read the source's troubleshooting page, then its file in this skill: [database-source-behaviors.md](database-source-behaviors.md). |
 
----
-
-## Escalation pointers
-
-When the event log doesn't explain a failure:
-
-1. **Public docs hub** — [Lakeflow Connect overview](https://docs.databricks.com/ingestion/lakeflow-connect) covers concepts and links to per-connector pages.
-2. **Connector reference** — [per-connector setup](https://docs.databricks.com/ingestion/lakeflow-connect/) is the canonical source for current auth, limits, and supported objects per source.
-3. **Workspace support** — file a support case from Help -> Contact Support inside the workspace; attach the pipeline ID and a relevant `event_log` extract.
-
-For monitoring patterns beyond event-log queries (dashboards, alerting on pipeline state, SLAs), see **databricks-pipelines**.
+Monitoring beyond event-log queries (dashboards, alerts on pipeline state): **databricks-pipelines**.

@@ -4,22 +4,9 @@ SQL Server (cloud and on-prem), by change tracking or CDC. This file covers the 
 
 ## SQL Server: change tracking vs CDC
 
-SQL Server offers two source mechanisms; pick one per database.
+SQL Server offers change tracking (which rows changed, read back from the table: the latest state per key) or CDC (change tables with every change); pick one per database.
 
 Errors on SQL Server (grants, capture instances, governor limits), and the docs troubleshooting page: [source behaviors and errors](#source-behaviors-and-errors).
-
-**Change Tracking (CT)** — lightweight. The source tracks "which rows changed since version X" but not the actual change history. The gateway re-reads changed rows from the base table.
-
-- Lower overhead on the source.
-- Adequate when downstream only needs the latest state per PK.
-- Cannot reconstruct historical change order.
-
-**Change Data Capture (CDC)** — full change log. The source writes inserts/updates/deletes into change tables that the gateway reads directly.
-
-- Higher overhead on the source (separate change tables, log reader job).
-- Required when downstream needs per-event history (audit, SCD2 from raw deltas, etc.).
-
-Most pipelines start with CT and switch to CDC only when audit or SCD2 demands it.
 
 **`SCD_TYPE_2` needs CDC on the table, or change tracking plus `VIEW SERVER STATE` for the connection's login, and pipeline create checks neither.** Without them an `SCD_TYPE_2` table is accepted, then its changes don't arrive, and no error is reported. Before creating the pipeline, check each table you'll set to `SCD_TYPE_2` (on the source, or through the connection with `remote_query`, see [source-sql-through-connection.md](source-sql-through-connection.md)):
 
@@ -89,13 +76,7 @@ The SDK Python equivalent uses `w.pipelines.create` twice — once with `gateway
 
 ## SQL Server on-prem
 
-Same setup as cloud, plus private networking from the gateway to the on-prem source:
-
-- **Azure**: ExpressRoute or VPN gateway between the customer VNet and the on-prem network.
-- **AWS**: Direct Connect or Site-to-Site VPN between the customer VPC and the on-prem network.
-- **GCP**: Cloud Interconnect or Cloud VPN.
-
-The private link has to reach the network of the compute that reads the source: the workspace's classic compute network, or serverless through a network connectivity configuration (NCC). See [compute](compute-and-feature-gates.md#compute-serverless-or-classic).
+Same setup as cloud. The private link (ExpressRoute, Direct Connect, Cloud Interconnect, or a VPN) has to reach the network of the compute that reads the source: the workspace's classic compute network, or serverless through a network connectivity configuration (NCC). See [compute](compute-and-feature-gates.md#compute-serverless-or-classic).
 
 ## Source behaviors and errors
 
